@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from typing import Optional
+from typing import List, Optional
 
 from .categories import CategoryNormalizer
 
@@ -25,6 +25,30 @@ BEST_CASHBACK_PATTERNS = [
         r"best cashback",
         r"лучший кешбек",
         r"top rewards",
+    )
+]
+
+RECOMMEND_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"recommend",
+        r"рекомендац",
+    )
+]
+
+HISTORY_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"history",
+        r"журнал",
+    )
+]
+
+PROFILE_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"profile",
+        r"профиль",
     )
 ]
 
@@ -52,6 +76,15 @@ class NLPService:
         for pattern in BEST_CASHBACK_PATTERNS:
             if pattern.search(text):
                 return "best_cashback"
+        for pattern in RECOMMEND_PATTERNS:
+            if pattern.search(text):
+                return "recommendations"
+        for pattern in HISTORY_PATTERNS:
+            if pattern.search(text):
+                return "history"
+        for pattern in PROFILE_PATTERNS:
+            if pattern.search(text):
+                return "profile"
         return None
 
     def parse_receipt(self, text: str) -> Optional[ParsedReceipt]:
@@ -93,3 +126,17 @@ class NLPService:
 
     def normalize_category(self, category: str) -> str:
         return self._normalizer.normalize(category)
+
+    def parse_category_block(self, text: str) -> List[tuple[str, float]]:
+        results: List[tuple[str, float]] = []
+        for line in text.splitlines():
+            cleaned = line.strip()
+            if not cleaned:
+                continue
+            match = re.search(r"(.+?)[\s:=\-]+([0-9]+(?:[.,][0-9]{1,2})?)%?", cleaned)
+            if not match:
+                continue
+            name = match.group(1).strip()
+            rate = float(match.group(2).replace(",", ".")) / 100
+            results.append((self._normalizer.normalize(name), rate))
+        return results
