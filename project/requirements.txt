@@ -1,0 +1,5 @@
+python-telegram-bot>=20.0,<21.0
+aiosqlite>=0.18
+pillow>=10.0
+pytesseract>=0.3.10
+pytz>=2023.3
