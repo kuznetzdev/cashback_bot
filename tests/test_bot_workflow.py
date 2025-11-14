@@ -7,6 +7,7 @@ if str(ROOT) not in sys.path:
 
 from project.bot import CashbackBot
 from project.services.db import InMemoryDB
+from project.services.scheduler import SchedulerService
 
 
 def extract_callback_data(message):
@@ -67,7 +68,20 @@ def test_receipt_processing_updates_analytics_and_recommendations():
 
 
 def test_notifications_schedule():
-    bot = CashbackBot(db=InMemoryDB())
-    bot.handle_callback(user_id=1, callback_data="nav:notifications")
+    scheduler = SchedulerService()
+    bot = CashbackBot(db=InMemoryDB(), scheduler=scheduler)
+    notifications_screen = bot.handle_callback(user_id=1, callback_data="nav:notifications")
+    callbacks = extract_callback_data(notifications_screen)
+    assert "action:enable_smart_notifications" in callbacks
+
     response = bot.handle_callback(user_id=1, callback_data="action:enable_weekly_notifications")
     assert "weekly" in response["text"]
+    entries = scheduler.list_all()
+    assert len(entries) == 1
+    assert entries[0].mode == "weekly"
+
+    response = bot.handle_callback(user_id=1, callback_data="action:enable_smart_notifications")
+    assert "smart" in response["text"]
+    entries = scheduler.list_all()
+    assert len(entries) == 1
+    assert entries[0].mode == "smart"
