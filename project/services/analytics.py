@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+from statistics import mean
 from typing import Dict, List
 
 from .categories import CategoryNormalizer
@@ -24,6 +25,16 @@ class BankStrength:
     score: int
     top_categories: int
     weak_categories: int
+
+
+@dataclass(frozen=True)
+class CategoryCoverage:
+    category: str
+    normalized_category: str
+    best_bank: str
+    best_rate: float
+    bank_count: int
+    average_rate: float
 
 
 class AnalyticsService:
@@ -50,6 +61,8 @@ class AnalyticsService:
         return insights
 
     async def top_worst_categories(self, user_id: int, limit: int = 5) -> List[CategoryInsight]:
+        if limit <= 0:
+            return []
         insights = await self._collect_insights(user_id)
         insights.sort(key=lambda insight: insight.rate)
         return insights[:limit]
@@ -98,4 +111,36 @@ class AnalyticsService:
             )
         strengths.sort(key=lambda strength: strength.score, reverse=True)
         return strengths
+
+    async def category_coverage_summary(
+        self, user_id: int, limit: int = 5
+    ) -> List[CategoryCoverage]:
+        if limit <= 0:
+            return []
+        insights = await self._collect_insights(user_id)
+        if not insights:
+            return []
+
+        grouped: Dict[str, List[CategoryInsight]] = defaultdict(list)
+        for insight in insights:
+            grouped[insight.normalized_category].append(insight)
+
+        coverage: List[CategoryCoverage] = []
+        for normalized_category, items in grouped.items():
+            best = max(items, key=lambda insight: insight.rate)
+            average_rate = mean(insight.rate for insight in items)
+            bank_count = len({insight.bank_name for insight in items})
+            coverage.append(
+                CategoryCoverage(
+                    category=best.category,
+                    normalized_category=normalized_category,
+                    best_bank=best.bank_name,
+                    best_rate=best.rate,
+                    bank_count=bank_count,
+                    average_rate=average_rate,
+                )
+            )
+
+        coverage.sort(key=lambda item: item.best_rate, reverse=True)
+        return coverage[:limit]
 

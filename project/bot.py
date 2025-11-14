@@ -490,12 +490,16 @@ async def show_analytics_pro(source: Update | CallbackQuery, context: ContextTyp
     worst = await analytics.top_worst_categories(user_id)
     buckets = await analytics.top_by_buckets(user_id)
     strengths = await analytics.bank_strength_score(user_id)
+    coverage = await analytics.category_coverage_summary(user_id)
     lines = [f"<b>{translator.translate('analytics_pro_header', locale)}</b>"]
+    has_data = False
     if worst:
+        has_data = True
         lines.append(translator.translate("analytics_worst_header", locale))
         for insight in worst:
             lines.append(f"• {insight.bank_name}: {insight.category} — {insight.rate * 100:.2f}%")
     if buckets:
+        has_data = True
         lines.append("")
         lines.append(translator.translate("analytics_bucket_header", locale))
         for bucket, items in buckets.items():
@@ -503,14 +507,35 @@ async def show_analytics_pro(source: Update | CallbackQuery, context: ContextTyp
             for insight in items[:5]:
                 lines.append(f"  • {insight.bank_name} — {insight.category} ({insight.rate * 100:.2f}%)")
     if strengths:
+        has_data = True
         lines.append("")
         lines.append(translator.translate("analytics_strength_header", locale))
         for strength in strengths:
             lines.append(
                 f"• {strength.bank_name}: {strength.score} (top={strength.top_categories}, weak={strength.weak_categories})"
             )
-    await render_screen(source, context, "\n".join(lines), keyboard=[[ButtonSpec(translator.translate("button_back", locale), f"nav:{NAV_MAIN}")]])
-
+    if coverage:
+        has_data = True
+        lines.append("")
+        lines.append(translator.translate("analytics_coverage_header", locale))
+        for item in coverage:
+            lines.append(
+                translator.translate("analytics_coverage_line", locale).format(
+                    category=item.category,
+                    best_bank=item.best_bank,
+                    best_rate=item.best_rate * 100,
+                    bank_count=item.bank_count,
+                    average_rate=item.average_rate * 100,
+                )
+            )
+    if not has_data:
+        lines.append(translator.translate("analytics_no_data", locale))
+    await render_screen(
+        source,
+        context,
+        "\n".join(lines),
+        keyboard=[[ButtonSpec(translator.translate("button_back", locale), f"nav:{NAV_MAIN}")]],
+    )
 
 async def show_recommendations(source: Update | CallbackQuery, context: ContextTypes.DEFAULT_TYPE) -> None:
     translator: Translator = context.application.bot_data["translator"]

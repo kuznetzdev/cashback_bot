@@ -76,3 +76,46 @@ async def test_gamification_points(tmp_path: Path) -> None:
     assert profile.points == 3
     current = await gamification.profile(user_id)
     assert current.points == 3
+
+
+@pytest.mark.asyncio
+async def test_analytics_category_coverage_summary(tmp_path: Path) -> None:
+    db = AsyncDatabase(tmp_path / "coverage.sqlite3")
+    await db.init()
+    normalizer = CategoryNormalizer()
+    analytics = AnalyticsService(db, normalizer)
+    user_id = await db.upsert_user(telegram_id=7, language="en")
+    bank_a = await db.create_user_bank(user_id, "Bank Alpha")
+    bank_b = await db.create_user_bank(user_id, "Bank Beta")
+    await db.replace_bank_categories(
+        bank_a,
+        [
+            ("Groceries", normalizer.normalize("Groceries"), 0.07, 1),
+            ("Fuel", normalizer.normalize("Fuel"), 0.02, 1),
+        ],
+    )
+    await db.replace_bank_categories(
+        bank_b,
+        [
+            ("Groceries", normalizer.normalize("Groceries"), 0.03, 1),
+            ("Fuel", normalizer.normalize("Fuel"), 0.05, 1),
+        ],
+    )
+
+    coverage = await analytics.category_coverage_summary(user_id)
+    assert coverage, "expected coverage insights"
+    groceries = next(
+        (item for item in coverage if item.normalized_category == normalizer.normalize("Groceries")),
+        None,
+    )
+    fuel = next(
+        (item for item in coverage if item.normalized_category == normalizer.normalize("Fuel")),
+        None,
+    )
+    assert groceries is not None
+    assert fuel is not None
+    assert groceries.best_bank == "Bank Alpha"
+    assert groceries.bank_count == 2
+    assert groceries.best_rate == pytest.approx(0.07)
+    assert fuel.best_bank == "Bank Beta"
+    assert fuel.average_rate == pytest.approx(0.035)
