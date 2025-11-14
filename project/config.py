@@ -19,6 +19,11 @@ class BotConfig:
     enable_notifications: bool
     analytics_window_days: int
     timezone: str
+    ocr_primary_lang: str
+    ocr_secondary_lang: str
+    inactivity_warning_days: int
+    inactivity_critical_days: int
+    max_history_records: int
 
 
 def _get_bool(name: str, default: bool) -> bool:
@@ -48,6 +53,11 @@ def load_config(env: Optional[dict[str, str]] = None) -> BotConfig:
     enable_notifications = _get_bool("ENABLE_NOTIFICATIONS", True)
     analytics_window_days = int(environ.get("ANALYTICS_WINDOW_DAYS", "90"))
     timezone = environ.get("BOT_TIMEZONE", "UTC")
+    ocr_primary_lang = environ.get("OCR_PRIMARY_LANG", "rus+eng")
+    ocr_secondary_lang = environ.get("OCR_SECONDARY_LANG", "eng")
+    inactivity_warning_days = int(environ.get("INACTIVITY_WARNING_DAYS", "30"))
+    inactivity_critical_days = int(environ.get("INACTIVITY_CRITICAL_DAYS", "90"))
+    max_history_records = int(environ.get("MAX_HISTORY_RECORDS", "30"))
 
     ocr_temp_dir.mkdir(parents=True, exist_ok=True)
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -65,4 +75,9 @@ def load_config(env: Optional[dict[str, str]] = None) -> BotConfig:
         enable_notifications=enable_notifications,
         analytics_window_days=analytics_window_days,
         timezone=timezone,
+        ocr_primary_lang=ocr_primary_lang,
+        ocr_secondary_lang=ocr_secondary_lang,
+        inactivity_warning_days=inactivity_warning_days,
+        inactivity_critical_days=inactivity_critical_days,
+        max_history_records=max_history_records,
     )

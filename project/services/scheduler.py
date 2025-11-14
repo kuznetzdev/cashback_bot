@@ -14,10 +14,11 @@ ReminderCallback = Callable[[], Awaitable[None]]
 
 
 class ReminderScheduler:
-    """Minimal scheduler for monthly reminders."""
+    """Periodic scheduler that delegates notification checks."""
 
-    def __init__(self, timezone: str = "UTC") -> None:
+    def __init__(self, timezone: str = "UTC", interval_minutes: int = 60) -> None:
         self._timezone = pytz.timezone(timezone)
+        self._interval = max(1, interval_minutes)
         self._task: asyncio.Task[None] | None = None
         self._stopped = asyncio.Event()
 
@@ -42,13 +43,14 @@ class ReminderScheduler:
 
     async def _run(self, callback: ReminderCallback) -> None:
         while not self._stopped.is_set():
-            now = datetime.now(self._timezone)
-            next_month = (now.replace(day=28) + timedelta(days=4)).replace(day=1)
-            delay = (next_month - now).total_seconds()
-            LOGGER.info("Scheduling next reminder in %.2f seconds", delay)
             try:
-                await asyncio.wait_for(self._stopped.wait(), timeout=delay)
-                break
-            except asyncio.TimeoutError:
                 await callback()
+            except Exception:  # pragma: no cover - defensive
+                LOGGER.exception("Reminder callback failed")
+            try:
+                await asyncio.wait_for(
+                    self._stopped.wait(), timeout=self._interval * 60
+                )
+            except asyncio.TimeoutError:
+                continue
 
