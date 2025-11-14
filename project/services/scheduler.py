@@ -1,4 +1,4 @@
-"""Scheduler managing notification jobs."""
+"""Notification scheduler abstraction."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -6,29 +6,20 @@ from typing import Dict, List
 
 
 @dataclass
-class ScheduledJob:
-    chat_id: int
-    job_type: str
-    schedule: str
+class ScheduledNotification:
+    user_id: int
+    mode: str
+    hour: int
 
 
 class SchedulerService:
-    """Keeps track of notification schedules."""
-
     def __init__(self) -> None:
-        self._jobs: Dict[int, List[ScheduledJob]] = {}
+        self._entries: Dict[int, ScheduledNotification] = {}
 
-    def schedule(self, chat_id: int, job_type: str, schedule: str) -> ScheduledJob:
-        job = ScheduledJob(chat_id=chat_id, job_type=job_type, schedule=schedule)
-        self._jobs.setdefault(chat_id, []).append(job)
-        return job
+    def schedule(self, user_id: int, mode: str, hour: int) -> ScheduledNotification:
+        entry = ScheduledNotification(user_id=user_id, mode=mode, hour=hour)
+        self._entries[user_id] = entry
+        return entry
 
-    def cancel(self, chat_id: int, job_type: str) -> None:
-        jobs = self._jobs.get(chat_id, [])
-        self._jobs[chat_id] = [job for job in jobs if job.job_type != job_type]
-
-    def list_jobs(self, chat_id: int) -> List[ScheduledJob]:
-        return list(self._jobs.get(chat_id, []))
-
-
-__all__ = ["SchedulerService", "ScheduledJob"]
+    def list_all(self) -> List[ScheduledNotification]:
+        return list(self._entries.values())

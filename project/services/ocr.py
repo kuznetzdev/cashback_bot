@@ -1,36 +1,23 @@
-"""OCR service abstractions for receipt processing."""
+"""OCR service supporting normal and smart modes."""
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Dict, List
+from typing import List
 
 
-@dataclass
-class OcrResult:
-    text: str
-    confidence: float
-    items: List[Dict[str, object]]
+class OCRService:
+    def __init__(self) -> None:
+        self.mode = "smart"
 
+    def set_mode(self, mode: str) -> None:
+        if mode not in {"basic", "smart"}:
+            raise ValueError("Unsupported OCR mode")
+        self.mode = mode
 
-class OcrService:
-    """Simulates OCR modes used by the bot."""
-
-    def recognise(self, image: bytes, mode: str = "smart") -> OcrResult:
-        """Recognise receipt text.
-
-        The *smart* mode increases the confidence to emulate more expensive OCR
-        pipelines. The output is deterministic to keep tests reproducible.
-        """
-
-        base_text = "Total: 1234"
-        base_items = [{"name": "Purchase", "amount": 1234.0}]
-        if mode == "smart":
-            confidence = 0.95
-            items = base_items + [{"name": "Bonus", "amount": 120.0}]
-        else:
-            confidence = 0.8
-            items = base_items
-        return OcrResult(text=base_text, confidence=confidence, items=items)
-
-
-__all__ = ["OcrService", "OcrResult"]
+    def extract_lines(self, image_bytes: bytes) -> List[str]:
+        if not image_bytes:
+            return []
+        payload = image_bytes.decode("utf-8", errors="ignore")
+        lines = [line.strip() for line in payload.splitlines() if line.strip()]
+        if self.mode == "smart":
+            return [line for line in lines if any(char.isdigit() for char in line)]
+        return lines

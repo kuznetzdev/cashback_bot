@@ -1,4 +1,4 @@
-"""In-memory persistence layer for the cashback bot."""
+"""In-memory persistence layer used by the bot services."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -6,136 +6,165 @@ from typing import Dict, List, Optional
 
 
 @dataclass
-class Bank:
-    identifier: str
+class Template:
+    template_id: str
     name: str
-    accounts: List[str] = field(default_factory=list)
-    preferences: Dict[str, str] = field(default_factory=dict)
+    fields: Dict[str, str]
 
 
 @dataclass
-class Template:
-    identifier: str
+class Bank:
+    bank_id: str
     name: str
-    pattern: str
-    bank_id: Optional[str] = None
+    product: str
+    templates: List[Template] = field(default_factory=list)
 
 
 @dataclass
 class Transaction:
-    identifier: str
+    transaction_id: str
+    bank_id: str
     amount: float
     category: str
-    bank_id: str
+    description: str
+
+
+@dataclass
+class Recommendation:
+    recommendation_id: str
+    text: str
 
 
 @dataclass
 class NotificationSettings:
-    mode: str = "smart"
-    quiet_hours: Optional[str] = None
+    mode: str
+    hour: int = 9
 
 
 @dataclass
-class GamificationState:
-    level: int = 1
-    experience: int = 0
+class HistoryEntry:
+    entry_id: str
+    summary: str
 
 
 @dataclass
-class ChatState:
+class Achievement:
+    code: str
+    title: str
+    progress: int
+
+
+@dataclass
+class BankWizardState:
+    step: int
+    name: Optional[str] = None
+    product: Optional[str] = None
+
+
+@dataclass
+class UserProfile:
+    user_id: int
     banks: Dict[str, Bank] = field(default_factory=dict)
-    templates: Dict[str, Template] = field(default_factory=dict)
     transactions: List[Transaction] = field(default_factory=list)
-    notification_settings: NotificationSettings = field(default_factory=NotificationSettings)
-    gamification: GamificationState = field(default_factory=GamificationState)
-    log: List[str] = field(default_factory=list)
+    recommendations: List[Recommendation] = field(default_factory=list)
+    history: List[HistoryEntry] = field(default_factory=list)
+    achievements: List[Achievement] = field(default_factory=list)
+    templates: Dict[str, Template] = field(default_factory=dict)
+    notifications: NotificationSettings = field(default_factory=lambda: NotificationSettings(mode="daily"))
+    wizard_state: Optional[BankWizardState] = None
 
 
-class Database:
-    """Stores all chat specific information."""
+class InMemoryDB:
+    """Simple in-memory data store safe for tests."""
 
     def __init__(self) -> None:
-        self._chats: Dict[int, ChatState] = {}
+        self._profiles: Dict[int, UserProfile] = {}
 
-    def _get_chat(self, chat_id: int) -> ChatState:
-        if chat_id not in self._chats:
-            self._chats[chat_id] = ChatState()
-        return self._chats[chat_id]
+    def _profile(self, user_id: int) -> UserProfile:
+        if user_id not in self._profiles:
+            self._profiles[user_id] = UserProfile(user_id=user_id)
+        return self._profiles[user_id]
 
-    # Bank management -----------------------------------------------------------------
-    def add_bank(self, chat_id: int, bank: Bank) -> None:
-        state = self._get_chat(chat_id)
-        state.banks[bank.identifier] = bank
-        state.log.append(f"bank:{bank.identifier}:created")
+    # Bank operations -----------------------------------------------------
 
-    def get_bank(self, chat_id: int, bank_id: str) -> Optional[Bank]:
-        return self._get_chat(chat_id).banks.get(bank_id)
+    def start_bank_wizard(self, user_id: int) -> BankWizardState:
+        profile = self._profile(user_id)
+        profile.wizard_state = BankWizardState(step=0)
+        return profile.wizard_state
 
-    def list_banks(self, chat_id: int) -> List[Bank]:
-        return list(self._get_chat(chat_id).banks.values())
+    def update_bank_wizard(self, user_id: int, name: Optional[str] = None, product: Optional[str] = None) -> BankWizardState:
+        profile = self._profile(user_id)
+        if profile.wizard_state is None:
+            profile.wizard_state = BankWizardState(step=0)
+        if name is not None:
+            profile.wizard_state.name = name
+            profile.wizard_state.step = 1
+        if product is not None:
+            profile.wizard_state.product = product
+            profile.wizard_state.step = 2
+        return profile.wizard_state
 
-    # Template management -------------------------------------------------------------
-    def add_template(self, chat_id: int, template: Template) -> None:
-        state = self._get_chat(chat_id)
-        state.templates[template.identifier] = template
-        state.log.append(f"template:{template.identifier}:created")
+    def complete_bank_wizard(self, user_id: int, bank_id: str) -> Bank:
+        profile = self._profile(user_id)
+        state = profile.wizard_state
+        if state is None or state.name is None or state.product is None:
+            raise ValueError("Wizard is not ready to complete")
+        bank = Bank(bank_id=bank_id, name=state.name, product=state.product)
+        profile.banks[bank_id] = bank
+        profile.wizard_state = None
+        return bank
 
-    def list_templates(self, chat_id: int) -> List[Template]:
-        return list(self._get_chat(chat_id).templates.values())
+    # Template operations -------------------------------------------------
 
-    def remove_template(self, chat_id: int, template_id: str) -> None:
-        state = self._get_chat(chat_id)
-        if template_id in state.templates:
-            del state.templates[template_id]
-            state.log.append(f"template:{template_id}:deleted")
+    def add_template(self, user_id: int, template: Template) -> None:
+        self._profile(user_id).templates[template.template_id] = template
 
-    # Transactions --------------------------------------------------------------------
-    def add_transaction(self, chat_id: int, transaction: Transaction) -> None:
-        state = self._get_chat(chat_id)
-        state.transactions.append(transaction)
-        state.log.append(f"transaction:{transaction.identifier}:added")
+    def delete_template(self, user_id: int, template_id: str) -> None:
+        self._profile(user_id).templates.pop(template_id, None)
 
-    def list_transactions(self, chat_id: int) -> List[Transaction]:
-        return list(self._get_chat(chat_id).transactions)
+    # Transaction operations ----------------------------------------------
 
-    # Analytics -----------------------------------------------------------------------
-    def monthly_cashback(self, chat_id: int) -> float:
-        transactions = self._get_chat(chat_id).transactions
-        return sum(tx.amount for tx in transactions if tx.amount > 0)
+    def add_transaction(self, user_id: int, transaction: Transaction) -> None:
+        self._profile(user_id).transactions.append(transaction)
 
-    # Notifications -------------------------------------------------------------------
-    def get_notifications(self, chat_id: int) -> NotificationSettings:
-        return self._get_chat(chat_id).notification_settings
+    def list_transactions(self, user_id: int) -> List[Transaction]:
+        return list(self._profile(user_id).transactions)
 
-    def update_notifications(self, chat_id: int, **kwargs: str) -> None:
-        state = self._get_chat(chat_id)
-        for key, value in kwargs.items():
-            if hasattr(state.notification_settings, key):
-                setattr(state.notification_settings, key, value)
-        state.log.append("notifications:updated")
+    # Recommendation operations ------------------------------------------
 
-    # Gamification --------------------------------------------------------------------
-    def get_gamification(self, chat_id: int) -> GamificationState:
-        return self._get_chat(chat_id).gamification
+    def set_recommendations(self, user_id: int, recommendations: List[Recommendation]) -> None:
+        self._profile(user_id).recommendations = recommendations
 
-    def add_experience(self, chat_id: int, experience: int) -> None:
-        state = self._get_chat(chat_id)
-        state.gamification.experience += experience
-        while state.gamification.experience >= 100:
-            state.gamification.level += 1
-            state.gamification.experience -= 100
-        state.log.append("gamification:progress")
+    def list_recommendations(self, user_id: int) -> List[Recommendation]:
+        return list(self._profile(user_id).recommendations)
 
-    # Audit log -----------------------------------------------------------------------
-    def get_log(self, chat_id: int) -> List[str]:
-        return list(self._get_chat(chat_id).log)
+    # History operations --------------------------------------------------
 
+    def add_history_entry(self, user_id: int, entry: HistoryEntry) -> None:
+        self._profile(user_id).history.append(entry)
 
-__all__ = [
-    "Database",
-    "Bank",
-    "Template",
-    "Transaction",
-    "NotificationSettings",
-    "GamificationState",
-]
+    def list_history(self, user_id: int) -> List[HistoryEntry]:
+        return list(self._profile(user_id).history)
+
+    # Achievement operations ---------------------------------------------
+
+    def set_achievements(self, user_id: int, achievements: List[Achievement]) -> None:
+        self._profile(user_id).achievements = achievements
+
+    def list_achievements(self, user_id: int) -> List[Achievement]:
+        return list(self._profile(user_id).achievements)
+
+    # Notification settings ----------------------------------------------
+
+    def update_notifications(self, user_id: int, mode: str, hour: int) -> NotificationSettings:
+        profile = self._profile(user_id)
+        profile.notifications = NotificationSettings(mode=mode, hour=hour)
+        return profile.notifications
+
+    def get_notifications(self, user_id: int) -> NotificationSettings:
+        return self._profile(user_id).notifications
+
+    # Misc ----------------------------------------------------------------
+
+    def reset(self) -> None:
+        self._profiles.clear()

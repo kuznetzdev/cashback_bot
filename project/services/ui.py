@@ -1,122 +1,88 @@
-"""UI rendering utilities and keyboard builders for the cashback bot."""
+"""User interface helpers for rendering structured Telegram screens."""
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, List, Mapping, MutableMapping, Optional
+from typing import Dict, Iterable, List, Mapping, MutableMapping, Optional, Sequence
 
-# Structured callback data prefixes recognised by the bot.
-CALLBACK_NAV_PREFIX = "nav:"
-CALLBACK_ACTION_PREFIX = "action:"
-CALLBACK_EDIT_PREFIX = "edit:"
-CALLBACK_DELETE_PREFIX = "del:"
+NAV_PREFIX = "nav:"
+ACTION_PREFIX = "action:"
+EDIT_PREFIX = "edit:"
+DELETE_PREFIX = "del:"
+
+DEFAULT_STYLE = {
+    "parse_mode": "HTML",
+}
+
+STATUS_MESSAGES: Mapping[str, str] = {
+    "processing": "⏳ Обрабатываю…",
+    "ready": "✅ Готово",
+    "error": "⚠️ Что-то пошло не так",
+}
+
+TYPING_INDICATORS: Mapping[str, str] = {
+    "ocr": "🖨 Распознаю чек…",
+    "nlp": "🧠 Анализирую покупки…",
+    "db": "💾 Сохраняю результаты…",
+}
 
 
 @dataclass(frozen=True)
-class KeyboardButton:
-    """Represents a single inline button."""
-
+class Button:
     text: str
     callback_data: str
 
 
-KeyboardLayout = List[List[KeyboardButton]]
+KeyboardLayout = List[List[Button]]
 
 
-def nav_callback(target: str) -> str:
-    """Build a navigation callback payload."""
-
-    return f"{CALLBACK_NAV_PREFIX}{target}"
-
-
-def action_callback(action: str) -> str:
-    """Build an action callback payload."""
-
-    return f"{CALLBACK_ACTION_PREFIX}{action}"
-
-
-def edit_callback(entity_id: str) -> str:
-    """Build an edit callback payload."""
-
-    return f"{CALLBACK_EDIT_PREFIX}{entity_id}"
-
-
-def delete_callback(entity_id: str) -> str:
-    """Build a delete callback payload."""
-
-    return f"{CALLBACK_DELETE_PREFIX}{entity_id}"
-
-
-def build_keyboard(rows: Iterable[Iterable[KeyboardButton]]) -> KeyboardLayout:
-    """Normalise arbitrary iterables into a layout list."""
-
-    return [list(row) for row in rows]
+def render_screen(
+    update: Optional[MutableMapping[str, object]],
+    context: Optional[MutableMapping[str, object]],
+    text: str,
+    keyboard: KeyboardLayout,
+) -> Dict[str, object]:
+    """Return a structure describing the rendered screen."""
+    message = {
+        "text": text,
+        "keyboard": [
+            [
+                {"text": button.text, "callback_data": button.callback_data}
+                for button in row
+            ]
+            for row in keyboard
+        ],
+        "style": DEFAULT_STYLE,
+    }
+    if context is not None:
+        context["last_screen"] = message
+    if update is not None:
+        update["rendered"] = message
+    return message
 
 
-def single_column(buttons: Iterable[KeyboardButton]) -> KeyboardLayout:
-    """Arrange buttons in a single column."""
-
-    return [[button] for button in buttons]
+def make_menu(button_rows: Sequence[Sequence[Button]]) -> KeyboardLayout:
+    return [[button for button in row] for row in button_rows]
 
 
-def pairwise(buttons: Iterable[KeyboardButton]) -> KeyboardLayout:
-    """Arrange buttons in rows of two."""
-
-    layout: KeyboardLayout = []
-    row: List[KeyboardButton] = []
-    for button in buttons:
-        row.append(button)
-        if len(row) == 2:
-            layout.append(row)
-            row = []
-    if row:
-        layout.append(row)
-    return layout
+def make_back_button(target: str, text: str = "⬅️ Назад") -> Button:
+    return Button(text=text, callback_data=f"{NAV_PREFIX}{target}")
 
 
-# Shared UI snippets for status indicators and reusable text fragments.
-STATUS_MESSAGES = {
-    "processing": "⏳ Обрабатываю…",
-    "ready": "✅ Готово",
-    "error": "⚠️ Произошла ошибка. Попробуйте ещё раз.",
-    "cancelled": "✖️ Действие отменено.",
-}
-
-TYPING_INDICATOR = "typing"
-UPLOADING_INDICATOR = "upload_document"
+def make_nav_button(target: str, text: str) -> Button:
+    return Button(text=text, callback_data=f"{NAV_PREFIX}{target}")
 
 
-@dataclass
-class RenderResult:
-    """Structured output produced by :func:`render_screen`."""
-
-    chat_id: Optional[int]
-    text: str
-    keyboard: Optional[KeyboardLayout]
+def make_action_button(action: str, text: str) -> Button:
+    return Button(text=text, callback_data=f"{ACTION_PREFIX}{action}")
 
 
-class UIContextProtocol:
-    """Simplified protocol for contexts used in tests and the bot."""
-
-    ui_messages: List[RenderResult]
+def make_edit_button(entity: str, text: str) -> Button:
+    return Button(text=text, callback_data=f"{EDIT_PREFIX}{entity}")
 
 
-def render_screen(update: Mapping[str, object], context: MutableMapping[str, object], text: str,
-                  keyboard: Optional[KeyboardLayout]) -> RenderResult:
-    """Render a screen and keep track of it for assertions.
+def make_delete_button(entity: str, text: str) -> Button:
+    return Button(text=text, callback_data=f"{DELETE_PREFIX}{entity}")
 
-    In the real Telegram bot the function would send a message using the Bot API.
-    Inside the tests we keep the render results inside the context so that
-    we can assert on them without depending on Telegram specific classes.
-    """
 
-    chat_id = None
-    if hasattr(update, "effective_chat") and getattr(update.effective_chat, "id", None) is not None:
-        chat_id = update.effective_chat.id
-    elif "chat_id" in update:
-        chat_id = int(update["chat_id"])  # type: ignore[arg-type]
-
-    layout = keyboard if keyboard else None
-    result = RenderResult(chat_id=chat_id, text=text, keyboard=layout)
-    message_log: List[RenderResult] = context.setdefault("ui_messages", [])  # type: ignore[assignment]
-    message_log.append(result)
-    return result
+def flatten_buttons(buttons: Iterable[Button]) -> List[Button]:
+    return list(buttons)

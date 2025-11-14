@@ -1,44 +1,31 @@
-"""Additional business logic for recommendations and gamification."""
+"""Extensibility hooks for advanced features."""
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import List
+from typing import Callable, List
 
-from project.services.db import Database
-
-
-@dataclass
-class Recommendation:
-    title: str
-    description: str
+from .db import Transaction
 
 
-class RecommendationEngine:
-    """Generates recommendations based on analytics context."""
+class ExtensionRegistry:
+    def __init__(self) -> None:
+        self._recommendation_hooks: List[Callable[[List[Transaction]], List[str]]] = []
 
-    def build(self, chat_id: int, db: Database) -> List[Recommendation]:
-        total_cashback = db.monthly_cashback(chat_id)
-        if total_cashback > 1000:
-            return [
-                Recommendation(
-                    title="Повысьте лимит",
-                    description="Вы приближаетесь к лимиту кешбэка, рассмотрите премиум карту.",
-                )
-            ]
-        return [
-            Recommendation(
-                title="Активируйте спецпредложение",
-                description="Доступна акция в партнёрских супермаркетах.",
-            )
-        ]
+    def register_recommendation_hook(
+        self, hook: Callable[[List[Transaction]], List[str]]
+    ) -> None:
+        self._recommendation_hooks.append(hook)
+
+    def build_recommendations(self, transactions: List[Transaction]) -> List[str]:
+        recommendations: List[str] = []
+        for hook in self._recommendation_hooks:
+            recommendations.extend(hook(transactions))
+        return recommendations
 
 
-class GamificationEngine:
-    """Calculates gamification progress messages."""
-
-    def build(self, chat_id: int, db: Database) -> str:
-        state = db.get_gamification(chat_id)
-        return f"Level {state.level} ({state.experience}/100 XP)"
-
-
-__all__ = ["Recommendation", "RecommendationEngine", "GamificationEngine"]
+def default_recommendation_hook(transactions: List[Transaction]) -> List[str]:
+    tips: List[str] = []
+    if any(t.amount > 1000 for t in transactions):
+        tips.append("Попробуйте оплату частями, чтобы увеличить кэшбэк")
+    if not tips:
+        tips.append("Следите за акциями банков, чтобы повысить выгоду")
+    return tips

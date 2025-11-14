@@ -1,29 +1,31 @@
-"""Category detection logic for parsed transactions."""
+"""Category inference and template expansion."""
 from __future__ import annotations
 
-from typing import Dict
+from typing import Dict, List
+
+from .db import Template
 
 
 class CategoryService:
-    """Maps merchants to human readable categories."""
+    def __init__(self) -> None:
+        self._manual_templates: Dict[str, Template] = {}
 
-    CATEGORY_MAP = {
-        "supermarket": "Продукты",
-        "online": "Онлайн-покупки",
-        "loyalty": "Бонусные программы",
-    }
+    def register_template(self, template: Template) -> None:
+        self._manual_templates[template.template_id] = template
 
-    def detect(self, merchant: str) -> str:
-        key = merchant.lower()
-        for prefix, category in self.CATEGORY_MAP.items():
-            if prefix in key:
-                return category
-        return "Прочее"
+    def unregister_template(self, template_id: str) -> None:
+        self._manual_templates.pop(template_id, None)
 
-    def enrich(self, ocr_items: Dict[str, object]) -> Dict[str, object]:
-        merchant = ocr_items.get("name", "Unknown")
-        category = self.detect(str(merchant))
-        return {**ocr_items, "category": category}
+    def infer_category(self, description: str) -> str:
+        lowered = description.lower()
+        for template in self._manual_templates.values():
+            if template.name.lower() in lowered:
+                return template.fields.get("category", "other")
+        if "аптека" in lowered:
+            return "pharmacy"
+        if "магазин" in lowered:
+            return "groceries"
+        return "other"
 
-
-__all__ = ["CategoryService"]
+    def expand_templates(self) -> List[Template]:
+        return list(self._manual_templates.values())

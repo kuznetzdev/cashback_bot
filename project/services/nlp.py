@@ -1,27 +1,45 @@
-"""NLP service supporting categorisation and recommendations."""
+"""NLP service for intent and entity extraction."""
 from __future__ import annotations
 
-from typing import Dict, List
+from dataclasses import dataclass
+from typing import List
 
 
-class NlpService:
-    """Extracts entities and intents from OCR text."""
-
-    def extract_entities(self, text: str) -> Dict[str, object]:
-        merchants = ["Supermarket", "Online Store"]
-        if "Bonus" in text:
-            merchants.append("Loyalty Program")
-        return {"merchants": merchants, "keywords": text.lower().split()}
-
-    def detect_intent(self, text: str) -> str:
-        if "bonus" in text.lower():
-            return "reward"
-        return "purchase"
-
-    def recommend_templates(self, text: str) -> List[str]:
-        if "total" in text.lower():
-            return ["total_amount", "cashback_candidate"]
-        return []
+@dataclass
+class ParsedTransaction:
+    amount: float
+    category: str
+    description: str
 
 
-__all__ = ["NlpService"]
+class NLPService:
+    def parse_lines(self, lines: List[str]) -> List[ParsedTransaction]:
+        transactions: List[ParsedTransaction] = []
+        for line in lines:
+            amount = self._extract_amount(line)
+            if amount is None:
+                continue
+            category = self._detect_category(line)
+            transactions.append(
+                ParsedTransaction(amount=amount, category=category, description=line)
+            )
+        return transactions
+
+    def _extract_amount(self, text: str) -> float | None:
+        digits = "".join(ch if ch.isdigit() or ch == "." else " " for ch in text).split()
+        for token in digits:
+            try:
+                return float(token)
+            except ValueError:
+                continue
+        return None
+
+    def _detect_category(self, text: str) -> str:
+        lowered = text.lower()
+        if "кафе" in lowered or "coffee" in lowered:
+            return "coffee"
+        if "аптека" in lowered:
+            return "pharmacy"
+        if "супермаркет" in lowered or "market" in lowered:
+            return "groceries"
+        return "other"

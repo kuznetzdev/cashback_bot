@@ -1,23 +1,29 @@
-"""Ranking service powering PRO analytics."""
+"""Analytics and ranking utilities."""
 from __future__ import annotations
 
-from typing import List, Tuple
+from typing import Dict, Iterable, List
 
-from project.services.db import Transaction
+from .db import Achievement, Transaction
 
 
 class RankingService:
-    """Builds ranked leaderboards for cashback performance."""
-
-    def build_leaderboard(self, transactions: List[Transaction]) -> List[Tuple[str, float]]:
-        leaderboard: List[Tuple[str, float]] = []
-        by_category: dict[str, float] = {}
+    def summarize(self, transactions: Iterable[Transaction]) -> Dict[str, float]:
+        totals: Dict[str, float] = {}
         for transaction in transactions:
-            by_category.setdefault(transaction.category, 0.0)
-            by_category[transaction.category] += transaction.amount
-        for category, amount in sorted(by_category.items(), key=lambda item: item[1], reverse=True):
-            leaderboard.append((category, round(amount, 2)))
-        return leaderboard
+            totals[transaction.category] = totals.get(transaction.category, 0.0) + transaction.amount
+        return totals
 
-
-__all__ = ["RankingService"]
+    def build_achievements(self, totals: Dict[str, float]) -> List[Achievement]:
+        achievements: List[Achievement] = []
+        for category, amount in totals.items():
+            if amount <= 0:
+                continue
+            progress = min(int(amount // 100 * 10), 100)
+            achievements.append(
+                Achievement(
+                    code=f"{category}_hero",
+                    title=f"Герой категории {category}",
+                    progress=progress,
+                )
+            )
+        return achievements
