@@ -226,8 +226,10 @@ class CashbackBot:
             self.categories.register_template(template)
             return self._render_templates(user_id)
         if action == "enable_weekly_notifications":
-            settings = self.db.update_notifications(user_id, mode="weekly", hour=18)
-            self.scheduler.schedule(user_id, settings.mode, settings.hour)
+            self._update_notifications(user_id, mode="weekly", hour=18)
+            return self._render_notifications(user_id)
+        if action == "enable_smart_notifications":
+            self._update_notifications(user_id, mode="smart", hour=20)
             return self._render_notifications(user_id)
         raise ValueError(f"Unknown action: {action}")
 
@@ -328,12 +330,20 @@ class CashbackBot:
         keyboard = make_menu(
             [
                 [make_action_button("enable_weekly_notifications", "Еженедельно в 18:00")],
+                [make_action_button("enable_smart_notifications", "Умные уведомления")],
                 [make_back_button("home")],
             ]
         )
         update: MutableMapping[str, object] = {}
         context: MutableMapping[str, object] = {}
         return render_screen(update, context, text, keyboard)
+
+    def _update_notifications(self, user_id: int, *, mode: str, hour: int) -> None:
+        # Always clear scheduled jobs for the user before re-scheduling to avoid
+        # duplicate notifications if the scheduler keeps historical entries.
+        self.scheduler.cancel(user_id)
+        settings = self.db.update_notifications(user_id, mode=mode, hour=hour)
+        self.scheduler.schedule(user_id, settings.mode, settings.hour)
 
     def _render_templates(self, user_id: int) -> Dict[str, object]:
         templates = list(self.db._profile(user_id).templates.values())  # type: ignore[attr-defined]

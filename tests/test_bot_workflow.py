@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+from typing import Dict, List, Optional
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -7,6 +8,35 @@ if str(ROOT) not in sys.path:
 
 from project.bot import CashbackBot
 from project.services.db import InMemoryDB
+from project.services.scheduler import SchedulerService, ScheduledNotification
+
+
+class ListScheduler:
+    """Test double emulating an append-only scheduler."""
+
+    def __init__(self) -> None:
+        self._entries: Dict[int, List[ScheduledNotification]] = {}
+
+    def schedule(self, user_id: int, mode: str, hour: int) -> ScheduledNotification:
+        entry = ScheduledNotification(user_id=user_id, mode=mode, hour=hour)
+        self._entries.setdefault(user_id, []).append(entry)
+        return entry
+
+    def cancel(self, user_id: int, mode: Optional[str] = None) -> None:
+        if mode is None:
+            self._entries.pop(user_id, None)
+            return
+        entries = self._entries.get(user_id)
+        if not entries:
+            return
+        remaining = [entry for entry in entries if entry.mode != mode]
+        if remaining:
+            self._entries[user_id] = remaining
+        else:
+            self._entries.pop(user_id, None)
+
+    def list_all(self) -> List[ScheduledNotification]:
+        return [entry for entries in self._entries.values() for entry in entries]
 
 
 def extract_callback_data(message):
@@ -67,7 +97,36 @@ def test_receipt_processing_updates_analytics_and_recommendations():
 
 
 def test_notifications_schedule():
-    bot = CashbackBot(db=InMemoryDB())
-    bot.handle_callback(user_id=1, callback_data="nav:notifications")
+    scheduler = SchedulerService()
+    bot = CashbackBot(db=InMemoryDB(), scheduler=scheduler)
+    notifications_screen = bot.handle_callback(user_id=1, callback_data="nav:notifications")
+    callbacks = extract_callback_data(notifications_screen)
+    assert "action:enable_smart_notifications" in callbacks
+
     response = bot.handle_callback(user_id=1, callback_data="action:enable_weekly_notifications")
     assert "weekly" in response["text"]
+    entries = scheduler.list_all()
+    assert len(entries) == 1
+    assert entries[0].mode == "weekly"
+
+    response = bot.handle_callback(user_id=1, callback_data="action:enable_smart_notifications")
+    assert "smart" in response["text"]
+    entries = scheduler.list_all()
+    assert len(entries) == 1
+    assert entries[0].mode == "smart"
+
+
+def test_notifications_reschedule_clears_duplicates():
+    scheduler = ListScheduler()
+    bot = CashbackBot(db=InMemoryDB(), scheduler=scheduler)
+
+    bot.handle_callback(user_id=1, callback_data="action:enable_weekly_notifications")
+    bot.handle_callback(user_id=1, callback_data="action:enable_weekly_notifications")
+    entries = scheduler.list_all()
+    assert len(entries) == 1
+    assert entries[0].mode == "weekly"
+
+    bot.handle_callback(user_id=1, callback_data="action:enable_smart_notifications")
+    entries = scheduler.list_all()
+    assert len(entries) == 1
+    assert entries[0].mode == "smart"
