@@ -458,7 +458,7 @@ async def handle_template_use(
 ) -> None:
     if len(parts) < 2:
         return
-    identifier = parts[1]
+    identifier = ":".join(parts[1:])
     template_service: TemplateService = context.application.bot_data["templates"]
     wizard: WizardService = context.application.bot_data["wizard"]
     user_id = await ensure_user(context, query)
