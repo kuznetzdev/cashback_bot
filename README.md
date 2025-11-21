@@ -1,44 +1,54 @@
-# cashback_bot
+# Cashback Bot (refactored)
 
-Asynchronous Telegram bot that helps users capture purchase receipts, extract cashback
-information via OCR/NLP, and review analytics in a personal cabinet.
+Асинхронный Telegram-бот для распознавания кешбэк-страниц, агрегации категорий и аналитики банков. Архитектура разделена на handler'ы, сервисы и pydantic-модели, повторяя подход `tender_bot`.
 
-## Local development
-
-1. Create a Python virtual environment (3.11+) and install dependencies:
-
-   ```bash
-   pip install -r project/requirements.txt
-   ```
-
-2. Export the Telegram bot token and optional overrides:
-
-   ```bash
-   export BOT_TOKEN="<your_token>"
-   export DB_PATH="./data/cashback.sqlite3"  # optional
-   ```
-
-3. Run the bot:
-
-   ```bash
-   python -m project.bot
-   ```
-
-## Docker
-
+## Структура
 ```
-docker build -t cashback-bot project/
-docker run --rm -e BOT_TOKEN="<your_token>" cashback-bot
+cashback_bot/
+    main.py                 # Точка входа, сборка Application и регистрация handler'ов
+    config.py               # Настройки через переменные окружения
+    requirements.txt        # Зависимости
+    requirements_autoinstall.py
+    .env.example
+
+    handlers/               # Только Telegram-логика и роутинг
+    keyboards/              # Отдельные клавиатуры
+    services/               # Бизнес-логика: OCR, NLP, storage, ranking, queue, scheduler
+    models/                 # Pydantic-модели
 ```
 
-## Project structure
+## Быстрый старт
+1. Установите зависимости:
+   ```bash
+   pip install -r cashback_bot/requirements.txt
+   ```
+2. Скопируйте `.env.example` и заполните токен бота:
+   ```bash
+   cp cashback_bot/.env.example .env
+   ```
+3. Запустите бота:
+   ```bash
+   python -m cashback_bot.main
+   ```
 
+## Возможности
+- Улучшенный OCR с препроцессингом и fallback-попытками.
+- Расширенный NLP со синонимами и интентами (`delete_category`, `edit_percent`, `best_query`, `best_overview`).
+- Категорийный предпросмотр, ручное редактирование и soft-delete.
+- История изменений, логи OCR, таблицы слияний категорий.
+- Безопасная очередь OCR-задач, предотвращающая пересечения контекста для пользователей.
+- Аналитика и рейтинги банков, подсказки по оптимизации кешбэка.
+- Планировщик ежедневных и ежемесячных напоминаний.
+
+## Примеры команд
+- `/start` — главное меню.
+- Отправьте текст с процентами ("АЗС - 7%") для ручного ввода.
+- Отправьте фото тарифов — бот распознает и создаст банк.
+- Текст "удали супермаркеты" — soft-delete категории.
+- Текст "измени процент у АЗС на 7%" — обновление ставки.
+- Текст "лучший кэшбек на АЗС" — поиск лучшего банка для категории.
+
+## Тесты
 ```
-project/
-├── bot.py                # Telegram bot entrypoint
-├── config.py             # Environment-driven configuration
-├── services/             # Async DB/OCR/NLP/analytics/scheduler layers
-├── i18n/                 # Localization utilities (EN/RU)
-├── requirements.txt
-└── Dockerfile
+pytest
 ```
