@@ -1,0 +1,29 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cashback_bot}
+      POSTGRES_USER: ${POSTGRES_USER:-cashback_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cashback_password}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  bot:
+    build:
+      context: .
+    restart: unless-stopped
+    depends_on:
+      - db
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      TESSERACT_PATH: tesseract
+    command: sh -c "alembic upgrade head && python -m app.main"
+
+volumes:
+  postgres_data:
