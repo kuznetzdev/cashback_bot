@@ -1,90 +1,187 @@
 # Cashback Analyzer
 
-Telegram-бот для анализа и сравнения категорий кэшбэка, которые банки предлагают пользователю. Проект построен как модульная система с отдельным ядром и отдельным Telegram-адаптером.
+Cashback Analyzer is a core-first cashback category analysis platform with two adapter layers:
 
-## Архитектура
+- Telegram bot on `aiogram 3`
+- Web application on `FastAPI` + SSR mobile-first UI
 
-- `app/services` — доменное ядро: нормализация категорий, парсинг, OCR, рейтинг, каталог банков.
-- `app/db` — persistence layer: модели SQLAlchemy, session factory, repositories.
-- `app/handlers`, `app/keyboards`, `app/middlewares`, `app/infrastructure/telegram_*` — внешний Telegram-слой и адаптеры.
-- `app/infrastructure/container.py` — композиция приложения без бизнес-логики.
-- `alembic/` — миграции PostgreSQL.
-- `tests/` — unit, repository, reminder и handler-level тесты.
+The product stores and compares current cashback offers from user banks/cards. It does not track transactions, real accrued cashback, expenses, or budgeting.
 
-## Возможности
+## Documentation Map
 
-- регистрация пользователя через `/start`;
-- добавление банка из списка или вручную;
-- ввод категорий через OCR, ручной текст или шаблон;
-- редактирование предпросмотра и пересохранение банка;
-- просмотр сохранённых банков;
-- рейтинг по категориям и глобальный рейтинг банков;
-- запросы вроде `где лучше азс` и `best cashback for fuel`;
-- настройки языка и уведомлений;
-- история действий и ежемесячные напоминания.
+- [Русская версия README](C:\Users\Kuznetz\Desktop\proga\cashback_bot\README.ru.md)
+- [Product Overview](C:\Users\Kuznetz\Desktop\proga\cashback_bot\docs\PRODUCT_OVERVIEW.md)
+- [Architecture](C:\Users\Kuznetz\Desktop\proga\cashback_bot\docs\ARCHITECTURE.md)
+- [Development And Runbook](C:\Users\Kuznetz\Desktop\proga\cashback_bot\docs\DEVELOPMENT.md)
+- [User Flows](C:\Users\Kuznetz\Desktop\proga\cashback_bot\docs\USER_FLOWS.md)
+- [Web User Cases](C:\Users\Kuznetz\Desktop\proga\cashback_bot\docs\WEB_USER_CASES.md)
+- [Русская документация](C:\Users\Kuznetz\Desktop\proga\cashback_bot\docs\ru\PRODUCT_OVERVIEW.md)
 
-## Переменные окружения
+## Short Description
 
-Скопируйте `.env.example` в `.env` и заполните значения:
+The project is a cross-platform web application for cashback management. It helps users collect cashback data from cards across different banks, verify and edit it, and then receive clear recommendations on which card to use for a specific category in order to maximize value.
 
-```env
-BOT_TOKEN=
-POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
-POSTGRES_DB=cashback_bot
-POSTGRES_USER=cashback_user
-POSTGRES_PASSWORD=cashback_password
-TESSERACT_PATH=tesseract
-LANG_DEFAULT=ru
-OCR_TIMEOUT=20
-MAX_FILE_SIZE=5242880
-APP_TIMEZONE=Europe/Moscow
-REMINDER_HOUR=10
-LOG_LEVEL=INFO
-TEMP_DIR=ocr_tmp
+## Business Goal
+
+The system exists to help a user decide which card to pay with in a real purchase scenario.
+
+This is not a bookkeeping product. It is a decision-support product for cashback optimization:
+
+- collect cashback offers from different banks
+- normalize them into a comparable model
+- let the user verify and edit the data
+- provide a practical recommendation for a category or purchase context
+
+In business terms, the product is a user-centric fintech utility that reduces value loss caused by fragmented bank offers, simplifies work with monthly-changing cashback categories, and converts complex banking conditions into a fast, practical, and mobile/desktop-friendly user experience.
+
+The long-term product direction is documented in [docs/PRODUCT_OVERVIEW.md](C:\Users\Kuznetz\Desktop\proga\cashback_bot\docs\PRODUCT_OVERVIEW.md). Current implementation scope is narrower than the full product vision, and the docs now separate those two layers explicitly.
+
+## What The System Does
+
+- Syncs Telegram users on `/start` or Telegram web login.
+- Collects cashback categories from screenshots via OCR.
+- Accepts manual category input and template-based draft creation.
+- Normalizes categories across RU/EN synonyms.
+- Lets the user edit draft and saved bank data.
+- Builds category leaders, global bank ranking, and best-bank answers.
+- Stores action history in `user_logs`.
+- Sends monthly reminders to users with enabled notifications.
+- Runs Telegram and web adapters independently through feature flags.
+
+## Current Baseline Vs Product Vision
+
+Current baseline already supports:
+
+- OCR/manual/template data ingestion
+- draft preview and editing
+- saved bank editing
+- category ranking and best-match lookup
+- settings, reminders, history
+- web and Telegram adapters over the same application core
+
+Target product vision additionally includes future extensions such as:
+
+- card-level metadata
+- cashback limits and validity windows
+- more advanced decision ranking
+- historical monthly snapshots
+- richer desktop analytics and bulk editing
+
+These future capabilities are described as roadmap/product direction, not as already-implemented features.
+
+## Architecture Summary
+
+The project follows a hexagonal/core-first split:
+
+- `app/domain`: pure domain models, enums, errors, normalization, parsing helpers, ranking rules.
+- `app/application`: workflow contracts, use cases, ports, application facade.
+- `app/adapters`: PostgreSQL, OCR, Telegram, web, scheduler, system clock.
+- `app/bootstrap`: configuration, dependency wiring, startup checks, migrations, runtime.
+
+The business entrypoint is transport-agnostic:
+
+```python
+handle_command(user, workflow_state, user_command) -> WorkflowResult
 ```
 
-## Локальный запуск
+Both Telegram and web adapters transform external input into `UserCommand` and render the returned `Screen`.
+
+Detailed architectural behavior is described in [docs/ARCHITECTURE.md](C:\Users\Kuznetz\Desktop\proga\cashback_bot\docs\ARCHITECTURE.md).
+
+## Repository Layout
+
+```text
+app/
+  adapters/
+    ocr_tesseract/
+    postgres/
+    scheduler/
+    system/
+    telegram/
+    web/
+  application/
+    contracts/
+    use_cases/
+  bootstrap/
+  domain/
+  locales/
+  main.py
+alembic/
+docs/
+tests/
+```
+
+## Quick Start
+
+### Local
 
 ```bash
-python -m venv .venv
-. .venv/bin/activate
-pip install -r requirements.txt
-alembic upgrade head
-python -m app.main
-```
-
-На Windows:
-
-```powershell
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-alembic upgrade head
 python -m app.main
 ```
 
-## Docker
+### Docker
 
 ```bash
-cp .env.example .env
 docker compose up --build
 ```
 
-Контейнер `bot` применяет миграции и запускает `python -m app.main`. `docker-compose.yml` поднимает и PostgreSQL, и приложение.
+At startup the application can:
 
-## Тесты
+- create the PostgreSQL database if `AUTO_CREATE_DB=true`
+- apply Alembic migrations if `AUTO_MIGRATE=true`
+- launch Telegram and/or web adapters depending on feature flags
+
+## Required Environment
+
+Core variables are documented in [.env.example](C:\Users\Kuznetz\Desktop\proga\cashback_bot\.env.example). The most important ones are:
+
+- `BOT_TOKEN`
+- `TELEGRAM_BOT_USERNAME`
+- `POSTGRES_HOST`
+- `POSTGRES_PORT`
+- `POSTGRES_DB`
+- `POSTGRES_USER`
+- `POSTGRES_PASSWORD`
+- `LANG_DEFAULT`
+- `OCR_TIMEOUT`
+- `MAX_FILE_SIZE`
+- `APP_ENABLE_TELEGRAM`
+- `APP_ENABLE_WEB`
+- `WEB_BASE_URL`
+- `WEB_SESSION_SECRET`
+
+## Run Modes
+
+- Telegram only: `APP_ENABLE_TELEGRAM=true`, `APP_ENABLE_WEB=false`
+- Web only: `APP_ENABLE_TELEGRAM=false`, `APP_ENABLE_WEB=true`
+- Both adapters: `APP_ENABLE_TELEGRAM=true`, `APP_ENABLE_WEB=true`
+
+The same application core serves all modes.
+
+## User Journey Summary
+
+The intended daily journey is:
+
+1. User logs in.
+2. Adds or updates a bank/card cashback offer.
+3. Verifies OCR/manual parsing on preview.
+4. Saves current active offers.
+5. Later asks "what should I pay with for this category?"
+6. Uses ranking output instead of manually comparing several bank apps.
+
+The detailed state-by-state flow map is documented in [docs/USER_FLOWS.md](C:\Users\Kuznetz\Desktop\proga\cashback_bot\docs\USER_FLOWS.md).
+
+## Validation
+
+Useful checks:
 
 ```bash
 pytest -q
+python -m compileall app
+docker compose config -q
 ```
 
-## Что реализовано
-
-- полная замена старой PTB/SQLite-версии на `aiogram 3 + PostgreSQL + SQLAlchemy Async`;
-- модульный код с отделённым доменным ядром и Telegram-адаптером;
-- Alembic-миграция начальной схемы;
-- OCR/NLP/ranking/catalog сервисы;
-- inline-навигация и черновик банка через FSM;
-- напоминания, локализация RU/EN и история действий;
-- Docker/Docker Compose, `.env.example`, README и тесты.
+Current staged baseline passes these checks.

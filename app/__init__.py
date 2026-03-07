@@ -1,1 +1,1 @@
-"""Cashback Analyzer package."""
+"""Cashback Analyzer."""

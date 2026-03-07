@@ -1,0 +1,1 @@
+"""Ports and adapter contracts."""

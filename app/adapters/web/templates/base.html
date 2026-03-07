@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="{{ language }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>{{ app_title or title or "Cashback Analyzer" }}</title>
+  <link rel="stylesheet" href="/static/web.css">
+</head>
+<body>
+  {% block content %}{% endblock %}
+  <script src="/static/web.js" defer></script>
+</body>
+</html>

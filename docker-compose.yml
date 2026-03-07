@@ -10,20 +10,96 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cashback_user} -d ${POSTGRES_DB:-cashback_bot}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
 
   bot:
     build:
       context: .
     restart: unless-stopped
     depends_on:
-      - db
-    env_file:
-      - .env
+      db:
+        condition: service_healthy
     environment:
+      BOT_TOKEN: ${BOT_TOKEN:-123456:TEST_TOKEN}
+      TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-cashback_analyzer_bot}
       POSTGRES_HOST: db
       POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-cashback_bot}
+      POSTGRES_USER: ${POSTGRES_USER:-cashback_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cashback_password}
+      POSTGRES_ADMIN_DB: ${POSTGRES_ADMIN_DB:-postgres}
+      APP_TIMEZONE: ${APP_TIMEZONE:-Europe/Moscow}
       TESSERACT_PATH: tesseract
-    command: sh -c "alembic upgrade head && python -m app.main"
+      AUTO_CREATE_DB: ${AUTO_CREATE_DB:-true}
+      AUTO_MIGRATE: ${AUTO_MIGRATE:-true}
+      MIGRATION_MAX_ATTEMPTS: ${MIGRATION_MAX_ATTEMPTS:-10}
+      MIGRATION_RETRY_DELAY: ${MIGRATION_RETRY_DELAY:-2.0}
+      DB_CONNECT_MAX_ATTEMPTS: ${DB_CONNECT_MAX_ATTEMPTS:-20}
+      DB_CONNECT_RETRY_DELAY: ${DB_CONNECT_RETRY_DELAY:-2.0}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-10}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-20}
+      DB_POOL_TIMEOUT: ${DB_POOL_TIMEOUT:-30}
+      DB_POOL_RECYCLE: ${DB_POOL_RECYCLE:-300}
+      TELEGRAM_RETRY_DELAY: ${TELEGRAM_RETRY_DELAY:-5.0}
+      APP_ENABLE_TELEGRAM: ${APP_ENABLE_TELEGRAM:-true}
+      APP_ENABLE_WEB: false
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      WEB_HOST: 0.0.0.0
+      WEB_PORT: 8080
+      WEB_BASE_URL: ${WEB_BASE_URL:-http://localhost:8080}
+      WEB_SESSION_SECRET: ${WEB_SESSION_SECRET:-change-me-session-secret}
+      WEB_SECURE_COOKIES: ${WEB_SECURE_COOKIES:-false}
+      WEB_MAX_UPLOAD_SIZE: ${WEB_MAX_UPLOAD_SIZE:-5242880}
+      TEMP_DIR: ${TEMP_DIR:-ocr_tmp}
+    command: python -m app.main
+
+  web:
+    build:
+      context: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${WEB_PORT:-8080}:8080"
+    environment:
+      BOT_TOKEN: ${BOT_TOKEN:-123456:TEST_TOKEN}
+      TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-cashback_analyzer_bot}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-cashback_bot}
+      POSTGRES_USER: ${POSTGRES_USER:-cashback_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cashback_password}
+      POSTGRES_ADMIN_DB: ${POSTGRES_ADMIN_DB:-postgres}
+      APP_TIMEZONE: ${APP_TIMEZONE:-Europe/Moscow}
+      TESSERACT_PATH: tesseract
+      AUTO_CREATE_DB: ${AUTO_CREATE_DB:-true}
+      AUTO_MIGRATE: ${AUTO_MIGRATE:-true}
+      MIGRATION_MAX_ATTEMPTS: ${MIGRATION_MAX_ATTEMPTS:-10}
+      MIGRATION_RETRY_DELAY: ${MIGRATION_RETRY_DELAY:-2.0}
+      DB_CONNECT_MAX_ATTEMPTS: ${DB_CONNECT_MAX_ATTEMPTS:-20}
+      DB_CONNECT_RETRY_DELAY: ${DB_CONNECT_RETRY_DELAY:-2.0}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-10}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-20}
+      DB_POOL_TIMEOUT: ${DB_POOL_TIMEOUT:-30}
+      DB_POOL_RECYCLE: ${DB_POOL_RECYCLE:-300}
+      TELEGRAM_RETRY_DELAY: ${TELEGRAM_RETRY_DELAY:-5.0}
+      APP_ENABLE_TELEGRAM: false
+      APP_ENABLE_WEB: true
+      WEB_HOST: 0.0.0.0
+      WEB_PORT: 8080
+      WEB_BASE_URL: ${WEB_BASE_URL:-http://localhost:8080}
+      WEB_SESSION_SECRET: ${WEB_SESSION_SECRET:-change-me-session-secret}
+      WEB_SECURE_COOKIES: ${WEB_SECURE_COOKIES:-false}
+      WEB_MAX_UPLOAD_SIZE: ${WEB_MAX_UPLOAD_SIZE:-5242880}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      TEMP_DIR: ${TEMP_DIR:-ocr_tmp}
+    command: python -m app.main
 
 volumes:
   postgres_data:

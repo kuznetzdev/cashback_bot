@@ -1,0 +1,221 @@
+from __future__ import annotations
+
+import asyncio
+import logging
+from pathlib import Path
+
+from alembic import command
+from alembic.config import Config
+from aiogram import Bot, Dispatcher
+from aiogram.exceptions import TelegramNetworkError, TelegramServerError, TelegramUnauthorizedError
+from aiogram.fsm.storage.memory import MemoryStorage
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncEngine
+
+from app.adapters.scheduler import ReminderLoop
+from app.adapters.system import NoopReminderSender
+from app.adapters.telegram import (
+    Localizer,
+    TelegramDependencies,
+    TelegramReminderSender,
+    TelegramScreenRenderer,
+    build_router,
+)
+from app.adapters.web import WebDependencies, create_web_app, run_web_server
+from app.application import ApplicationFacade
+from app.bootstrap.config import Settings, get_settings
+from app.bootstrap.container import build_application_facade, build_core_container
+from app.bootstrap.db_startup import ensure_database_exists
+from app.bootstrap.logger import configure_logging
+
+logger = logging.getLogger(__name__)
+
+
+async def run_app() -> None:
+    settings = get_settings()
+    configure_logging(settings.log_level)
+    _validate_startup_settings(settings)
+
+    await ensure_database_exists(settings)
+
+    core = build_core_container(settings)
+    settings.temp_dir.mkdir(parents=True, exist_ok=True)
+
+    locales_dir = Path(__file__).resolve().parents[1] / "locales"
+    localizer = Localizer(locales_dir=locales_dir, default_language=settings.lang_default)
+
+    await _wait_for_database(
+        core.engine,
+        max_attempts=settings.db_connect_max_attempts,
+        retry_delay=settings.db_connect_retry_delay,
+    )
+    await _run_migrations(
+        database_url=settings.sqlalchemy_database_uri,
+        enabled=settings.auto_migrate,
+        max_attempts=settings.migration_max_attempts,
+        retry_delay=settings.migration_retry_delay,
+    )
+
+    tasks: list[asyncio.Task[None]] = []
+    telegram_facade = None
+    if settings.app_enable_telegram:
+        bot = Bot(token=settings.bot_token)
+        reminder_sender = TelegramReminderSender(bot=bot, localizer=localizer)
+        telegram_facade = build_application_facade(core, reminder_sender)
+        tasks.append(
+            asyncio.create_task(
+                _run_telegram_adapter(
+                    settings=settings,
+                    bot=bot,
+                    facade=telegram_facade,
+                    localizer=localizer,
+                ),
+                name="telegram-adapter",
+            )
+        )
+    if settings.app_enable_web:
+        web_facade = telegram_facade or build_application_facade(core, NoopReminderSender())
+        web_deps = WebDependencies(
+            facade=web_facade,
+            localizer=localizer,
+            default_language=settings.lang_default,
+            temp_dir=settings.temp_dir,
+            bot_token=settings.bot_token,
+            bot_username=settings.telegram_bot_username,
+            web_base_url=settings.web_base_url,
+            max_upload_size=min(settings.web_max_upload_size, settings.max_file_size),
+            secure_cookies=settings.web_secure_cookies,
+            session_secret=settings.web_session_secret,
+        )
+        web_app = create_web_app(web_deps)
+        tasks.append(
+            asyncio.create_task(
+                run_web_server(
+                    web_app,
+                    host=settings.web_host,
+                    port=settings.web_port,
+                    log_level=settings.log_level,
+                ),
+                name="web-adapter",
+            )
+        )
+    try:
+        logger.info(
+            "Cashback Analyzer starting (telegram=%s, web=%s)",
+            settings.app_enable_telegram,
+            settings.app_enable_web,
+        )
+        if len(tasks) == 1:
+            await tasks[0]
+        else:
+            await asyncio.gather(*tasks)
+    except asyncio.CancelledError:
+        logger.info("Application runtime cancelled")
+        raise
+    finally:
+        logger.info("Shutting down application...")
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        await core.engine.dispose()
+
+
+async def _run_telegram_adapter(
+    *,
+    settings: Settings,
+    bot: Bot,
+    facade: ApplicationFacade,
+    localizer: Localizer,
+) -> None:
+    dp = Dispatcher(storage=MemoryStorage())
+    renderer = TelegramScreenRenderer(localizer=localizer)
+    telegram_deps = TelegramDependencies(
+        facade=facade,
+        renderer=renderer,
+        localizer=localizer,
+        temp_dir=settings.temp_dir,
+        default_language=settings.lang_default,
+    )
+    dp.include_router(build_router(telegram_deps))
+    reminder_loop = ReminderLoop(facade.send_monthly_reminders)
+    reminder_loop.start()
+    try:
+        await _run_polling_with_retry(
+            dp=dp,
+            bot=bot,
+            retry_delay=settings.telegram_retry_delay,
+        )
+    finally:
+        await reminder_loop.stop()
+        await dp.storage.close()
+        await bot.session.close()
+
+
+async def _wait_for_database(engine: AsyncEngine, *, max_attempts: int, retry_delay: float) -> None:
+    for attempt in range(1, max_attempts + 1):
+        try:
+            async with engine.connect() as connection:
+                await connection.execute(text("SELECT 1"))
+            logger.info("Database connection is ready.")
+            return
+        except (SQLAlchemyError, OSError) as error:
+            logger.warning("Database not ready (attempt %s/%s): %s", attempt, max_attempts, error)
+            if attempt == max_attempts:
+                raise RuntimeError("Database connection failed after retries.") from error
+            await asyncio.sleep(retry_delay)
+
+
+async def _run_polling_with_retry(*, dp: Dispatcher, bot: Bot, retry_delay: float) -> None:
+    while True:
+        try:
+            await dp.start_polling(bot)
+            return
+        except TelegramUnauthorizedError:
+            logger.critical("Telegram token is invalid (Unauthorized).")
+            raise
+        except (TelegramNetworkError, TelegramServerError) as error:
+            logger.warning("Telegram polling transient error: %s. Retry in %.1f sec.", error, retry_delay)
+            await asyncio.sleep(retry_delay)
+
+
+async def _run_migrations(*, database_url: str, enabled: bool, max_attempts: int, retry_delay: float) -> None:
+    if not enabled:
+        logger.info("AUTO_MIGRATE disabled. Skip migrations.")
+        return
+    for attempt in range(1, max_attempts + 1):
+        try:
+            await asyncio.to_thread(_upgrade_head_sync, database_url)
+            logger.info("Migrations applied successfully.")
+            return
+        except Exception as error:
+            logger.warning("Migration attempt %s/%s failed: %s", attempt, max_attempts, error)
+            if attempt == max_attempts:
+                raise RuntimeError("Migration failed after retries.") from error
+            await asyncio.sleep(retry_delay)
+
+
+def _upgrade_head_sync(database_url: str) -> None:
+    alembic_ini = Path(__file__).resolve().parents[2] / "alembic.ini"
+    config = Config(str(alembic_ini))
+    config.set_main_option("sqlalchemy.url", database_url)
+    command.upgrade(config, "head")
+
+
+def _validate_startup_settings(settings: Settings) -> None:
+    if not settings.app_enable_telegram and not settings.app_enable_web:
+        raise RuntimeError("At least one adapter must be enabled (APP_ENABLE_TELEGRAM or APP_ENABLE_WEB).")
+    token = settings.bot_token.strip()
+    if (settings.app_enable_telegram or settings.app_enable_web) and (
+        not token or token.endswith(":TEST_TOKEN") or "replace_me" in token.lower()
+    ):
+        raise RuntimeError("BOT_TOKEN is not configured. Set a valid Telegram bot token in .env or environment.")
+    if settings.app_enable_web and not settings.telegram_bot_username.strip():
+        raise RuntimeError("TELEGRAM_BOT_USERNAME is required when APP_ENABLE_WEB=true.")
+    if settings.app_enable_web and (
+        settings.web_session_secret == "change-me-session-secret"
+        or settings.web_session_secret.strip() == ""
+    ):
+        raise RuntimeError("WEB_SESSION_SECRET must be set to a non-default secret when APP_ENABLE_WEB=true.")

@@ -1,53 +1,42 @@
 from decimal import Decimal
 
-import pytest
-
-from app.schemas.cashback_item import DraftCashbackItem
+from app.domain.models import CashbackDraftItem
 
 
-@pytest.mark.asyncio
-async def test_catalog_save_replace_and_delete_bank(app_container, session, db_user) -> None:
-    items = [
-        DraftCashbackItem(
-            raw_category="АЗС",
-            normalized_category="fuel",
-            percent=Decimal("5"),
-            source_type="manual",
+async def test_store_replace_for_bank_behaviour(uow_factory) -> None:
+    async with uow_factory() as uow:
+        user = await uow.users.upsert(
+            external_user_id=100,
+            username="u",
+            full_name="User",
+            default_language="ru",
         )
-    ]
-    bank = await app_container.catalog_service.save_bank(
-        session,
-        db_user,
-        bank_name="T-Bank Black",
-        items=items,
-        source_type="manual",
-    )
-
-    details = await app_container.catalog_service.get_bank_details(session, db_user, bank.id)
-    assert details.bank_name == "T-Bank Black"
-    assert len(details.items) == 1
-
-    updated_items = [
-        DraftCashbackItem(
-            raw_category="Рестораны",
-            normalized_category="restaurants",
-            percent=Decimal("7"),
-            source_type="manual",
+        bank = await uow.banks.create(user.id, "Bank A")
+        await uow.cashback.replace_for_bank(
+            bank.id,
+            [
+                CashbackDraftItem(
+                    raw_category="АЗС",
+                    normalized_category="fuel",
+                    percent=Decimal("5"),
+                    source_type="manual",
+                )
+            ],
         )
-    ]
-    await app_container.catalog_service.save_bank(
-        session,
-        db_user,
-        bank_name="T-Bank Black",
-        items=updated_items,
-        source_type="manual",
-        bank_id=bank.id,
-    )
+        await uow.cashback.replace_for_bank(
+            bank.id,
+            [
+                CashbackDraftItem(
+                    raw_category="Аптеки",
+                    normalized_category="pharmacy",
+                    percent=Decimal("3"),
+                    source_type="manual",
+                )
+            ],
+        )
+        await uow.commit()
 
-    updated = await app_container.catalog_service.get_bank_details(session, db_user, bank.id)
-    assert len(updated.items) == 1
-    assert updated.items[0].normalized_category == "restaurants"
-
-    await app_container.catalog_service.delete_bank(session, db_user, bank.id)
-    banks = await app_container.catalog_service.list_banks(session, db_user)
-    assert banks == []
+    async with uow_factory() as uow:
+        items = await uow.cashback.list_for_bank(bank.id)
+    assert len(items) == 1
+    assert items[0].normalized_category == "pharmacy"

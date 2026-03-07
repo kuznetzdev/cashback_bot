@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="app-shell">
+  <header class="app-header">
+    <div class="brand">
+      <strong>{{ app_title }}</strong>
+      <small>{{ user_name }}</small>
+    </div>
+    <form method="post" action="/auth/logout" class="logout-form">
+      <button class="btn btn-ghost" type="submit">{{ logout_label }}</button>
+    </form>
+  </header>
+
+  {% if status_messages %}
+  <section class="toast-wrap">
+    {% for message in status_messages %}
+      <div class="toast toast-success" role="status">{{ message }}</div>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  {% if error_message %}
+  <section class="toast-wrap">
+    <div class="toast toast-error" role="alert">{{ error_message }}</div>
+  </section>
+  {% endif %}
+
+  <main class="screen-wrap" data-screen="{{ screen_id }}" data-layout="{{ screen_layout_hint }}">
+    <section class="screen-card">
+      <h1>{{ screen_title }}</h1>
+      <div class="screen-body">{{ screen_body|replace('\n', '<br>')|safe }}</div>
+    </section>
+
+    {% if input_panel %}
+    <section class="input-panel {% if screen_id == 'edit_item' %}input-panel-sheet{% endif %}">
+      <h2>{{ input_panel.title }}</h2>
+      {% if input_panel.kind == "textarea" %}
+      <form method="post" action="/app/input" data-loading-form>
+        <textarea name="text" rows="6" placeholder="{{ input_panel.placeholder }}" required></textarea>
+        <button class="btn btn-primary btn-block" type="submit">{{ input_panel.submit_label }}</button>
+      </form>
+      {% elif input_panel.kind == "file" %}
+      <form method="post" action="/app/upload" enctype="multipart/form-data" data-loading-form>
+        <label class="file-field">
+          <input type="file" name="file" accept="{{ input_panel.accept }}" required data-upload-input>
+          <span>{{ input_panel.hint }}</span>
+        </label>
+        <img alt="Preview" class="upload-preview" data-upload-preview hidden>
+        <button class="btn btn-primary btn-block" type="submit">{{ input_panel.submit_label }}</button>
+      </form>
+      {% else %}
+      <form method="post" action="/app/input" data-loading-form>
+        <input type="text"
+               name="text"
+               placeholder="{{ input_panel.placeholder }}"
+               inputmode="{{ input_panel.inputmode }}"
+               required>
+        <button class="btn btn-primary btn-block" type="submit">{{ input_panel.submit_label }}</button>
+      </form>
+      {% endif %}
+    </section>
+    {% endif %}
+
+    <section class="actions-wrap">
+      {% if actions %}
+        {% for action in actions %}
+        <form method="post" action="/app/action" class="action-form" data-loading-form>
+          <input type="hidden" name="command" value="{{ action.command }}">
+          <input type="hidden" name="payload_json" value='{{ action.payload_json }}'>
+          <button type="submit" class="btn btn-{{ action.variant }} btn-block">{{ action.label }}</button>
+        </form>
+        {% endfor %}
+      {% endif %}
+
+      {% if has_more_actions %}
+      <a class="btn btn-ghost btn-block" href="/app?actions_limit={{ next_actions_limit }}">{{ show_more_label }}</a>
+      {% endif %}
+    </section>
+  </main>
+
+  <div class="loading-overlay" data-loading-overlay hidden>
+    <span>{{ processing_label }}</span>
+  </div>
+</div>
+{% endblock %}
