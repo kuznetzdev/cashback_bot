@@ -12,9 +12,9 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from app.adapters.telegram.callbacks import encode_action
-from app.adapters.telegram.localizer import Localizer
 from app.adapters.telegram.state import load_last_screen_message_id, save_last_screen_message_id
 from app.application.models import Screen
+from app.i18n.localizer import Localizer
 
 logger = logging.getLogger(__name__)
 

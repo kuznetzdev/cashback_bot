@@ -1,9 +1,8 @@
 from __future__ import annotations
 
+import io
 import logging
 from dataclasses import dataclass
-from pathlib import Path
-from uuid import uuid4
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
@@ -12,13 +11,15 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from app.adapters.telegram.callbacks import decode_callback
-from app.adapters.telegram.localizer import Localizer
 from app.adapters.telegram.renderer import TelegramScreenRenderer
 from app.adapters.telegram.state import load_workflow_state, save_workflow_state
 from app.application import ApplicationFacade
-from app.application.models import Effect, UserCommand, UserContext
+from app.application.auth.models import ExternalIdentityContext
+from app.application.dto.media import ImageUpload
+from app.application.models import Effect, UserCommand
 from app.domain.errors import DomainError
-from app.domain.models import UserProfile
+from app.domain.models import UserAccount
+from app.i18n.localizer import Localizer
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,6 @@ class TelegramDependencies:
     facade: ApplicationFacade
     renderer: TelegramScreenRenderer
     localizer: Localizer
-    temp_dir: Path
     default_language: str
 
 
@@ -75,17 +75,25 @@ def build_router(deps: TelegramDependencies) -> Router:
             return
 
         status: Message | None = None
-        deps.temp_dir.mkdir(parents=True, exist_ok=True)
-        temp_path = deps.temp_dir / f"tg_{uuid4().hex}.jpg"
         try:
             status = await deps.renderer.notify_status(message, deps.localizer.t("messages.processing", user.language))
             photo = message.photo[-1]
-            await message.bot.download(photo, destination=temp_path)
+            buffer = io.BytesIO()
+            await message.bot.download(photo, destination=buffer)
             await _handle_event(
                 deps=deps,
                 event=message,
                 state=state,
-                command=UserCommand(name="submit_photo_path", payload={"path": str(temp_path)}),
+                command=UserCommand(
+                    name="submit_uploaded_image",
+                    payload={
+                        "upload": ImageUpload(
+                            content=buffer.getvalue(),
+                            filename=f"telegram_{photo.file_unique_id}.jpg",
+                            content_type="image/jpeg",
+                        )
+                    },
+                ),
                 known_user=user,
             )
         except (RuntimeError, OSError) as error:
@@ -107,10 +115,6 @@ def build_router(deps: TelegramDependencies) -> Router:
             )
             await deps.renderer.notify_error(message, deps.localizer.t("errors.unexpected", user.language))
         finally:
-            try:
-                temp_path.unlink(missing_ok=True)
-            except OSError as error:
-                logger.warning("Failed to cleanup telegram temp file %s: %s", temp_path, error)
             if status is not None:
                 try:
                     await status.delete()
@@ -134,7 +138,7 @@ async def _handle_event(
     command: UserCommand,
     log_action: str | None = None,
     reset_state: bool = False,
-    known_user: UserProfile | None = None,
+    known_user: UserAccount | None = None,
 ) -> None:
     user = known_user
     language = deps.default_language
@@ -196,19 +200,24 @@ async def _sync_user_only(
     event: Message | CallbackQuery,
     *,
     log_action: str | None = None,
-) -> UserProfile:
+) -> UserAccount:
     if isinstance(event, Message):
         from_user = event.from_user
     else:
         from_user = event.from_user
     if from_user is None:
         raise RuntimeError("Update does not have from_user")
-    context = UserContext(
-        external_user_id=from_user.id,
-        username=from_user.username,
-        full_name=from_user.full_name,
+    identity = ExternalIdentityContext(
+        provider="telegram",
+        provider_user_id=str(from_user.id),
+        provider_username=from_user.username,
+        provider_display_name=from_user.full_name,
     )
-    return await deps.facade.sync_user(context, log_action=log_action)
+    return await deps.facade.authenticate_external_identity(
+        identity,
+        create_user_if_missing=True,
+        log_action=log_action,
+    )
 
 
 def _map_text_to_command(text: str) -> UserCommand:
@@ -232,7 +241,7 @@ async def _apply_effects(
     *,
     deps: TelegramDependencies,
     event: Message | CallbackQuery,
-    user: UserProfile,
+    user: UserAccount,
     language: str,
     effects: list[Effect],
 ) -> None:
@@ -259,7 +268,7 @@ async def _apply_effects(
 async def _safe_log_event(
     *,
     deps: TelegramDependencies,
-    user: UserProfile | None,
+    user: UserAccount | None,
     action: str,
     payload: dict[str, object] | None = None,
 ) -> None:

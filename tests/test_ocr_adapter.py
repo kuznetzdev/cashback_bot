@@ -4,11 +4,16 @@ import time
 from pathlib import Path
 
 import pytest
-from PIL import Image
 import pytesseract
+from PIL import Image
 
 from app.adapters.ocr_tesseract.service import TesseractOCRAdapter
+from app.application.dto.media import ImageUpload
 from app.domain.errors import ValidationError
+
+
+def _upload_from_path(path: Path, *, content_type: str = "image/png") -> ImageUpload:
+    return ImageUpload(content=path.read_bytes(), filename=path.name, content_type=content_type)
 
 
 @pytest.mark.asyncio
@@ -24,7 +29,7 @@ async def test_ocr_adapter_extracts_text_with_stubbed_engine(tmp_path: Path, mon
     )
     monkeypatch.setattr(TesseractOCRAdapter, "_ocr", staticmethod(lambda _: "АЗС 5%"))
 
-    text = await adapter.extract_text(image_path)
+    text = await adapter.extract_text(_upload_from_path(image_path))
     assert text == "АЗС 5%"
 
 
@@ -40,7 +45,9 @@ async def test_ocr_adapter_rejects_large_files(tmp_path: Path) -> None:
         temp_dir=tmp_path / "ocr",
     )
     with pytest.raises(ValidationError) as error:
-        await adapter.extract_text(large_file)
+        await adapter.extract_text(
+            ImageUpload(content=large_file.read_bytes(), filename=large_file.name, content_type="application/octet-stream")
+        )
     assert error.value.message_key == "errors.file_too_large"
 
 
@@ -56,7 +63,7 @@ async def test_ocr_adapter_handles_broken_image(tmp_path: Path) -> None:
         temp_dir=tmp_path / "ocr",
     )
     with pytest.raises(ValidationError) as error:
-        await adapter.extract_text(broken)
+        await adapter.extract_text(ImageUpload(content=broken.read_bytes(), filename=broken.name, content_type="image/jpeg"))
     assert error.value.message_key == "errors.broken_image"
 
 
@@ -78,7 +85,7 @@ async def test_ocr_adapter_timeout_maps_to_validation_error(tmp_path: Path, monk
     monkeypatch.setattr(TesseractOCRAdapter, "_preprocess", staticmethod(_slow_preprocess))
 
     with pytest.raises(ValidationError) as error:
-        await adapter.extract_text(image_path)
+        await adapter.extract_text(_upload_from_path(image_path))
     assert error.value.message_key == "errors.ocr_timeout"
 
 

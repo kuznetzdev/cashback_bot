@@ -8,16 +8,23 @@ from decimal import Decimal
 import pytest
 
 from app.application.contracts.ports import UnitOfWorkPort
-from app.domain.models import Bank, CashbackDraftItem, UserLogEntry, UserProfile
+from app.application.dto.media import ImageUpload
+from app.domain.models import Bank, CashbackDraftItem, LocalCredentials, ReminderTarget, UserAccount, UserIdentity, UserLogEntry
 
 
 @dataclass(slots=True)
 class InMemoryStore:
     next_user_id: int = 1
+    next_identity_id: int = 1
+    next_credentials_id: int = 1
     next_bank_id: int = 1
     next_log_id: int = 1
-    users: dict[int, UserProfile] = field(default_factory=dict)
-    users_by_external: dict[int, int] = field(default_factory=dict)
+    users: dict[int, UserAccount] = field(default_factory=dict)
+    identities: dict[int, UserIdentity] = field(default_factory=dict)
+    identity_index: dict[tuple[str, str], int] = field(default_factory=dict)
+    credentials: dict[int, LocalCredentials] = field(default_factory=dict)
+    credentials_by_username: dict[str, int] = field(default_factory=dict)
+    credentials_by_email: dict[str, int] = field(default_factory=dict)
     banks: dict[int, Bank] = field(default_factory=dict)
     bank_items: dict[int, list[CashbackDraftItem]] = field(default_factory=dict)
     logs: list[UserLogEntry] = field(default_factory=list)
@@ -27,40 +34,18 @@ class InMemoryUsersRepo:
     def __init__(self, store: InMemoryStore) -> None:
         self.store = store
 
-    async def upsert(
-        self,
-        *,
-        external_user_id: int,
-        username: str | None,
-        full_name: str | None,
-        default_language: str,
-    ) -> UserProfile:
-        internal_id = self.store.users_by_external.get(external_user_id)
-        if internal_id is None:
-            user = UserProfile(
-                id=self.store.next_user_id,
-                external_user_id=external_user_id,
-                username=username,
-                full_name=full_name,
-                language=default_language,
-                notifications_enabled=True,
-            )
-            self.store.users[user.id] = user
-            self.store.users_by_external[external_user_id] = user.id
-            self.store.next_user_id += 1
-            return user
-        user = self.store.users[internal_id]
-        user.username = username
-        user.full_name = full_name
+    async def create(self, *, display_name: str, default_language: str) -> UserAccount:
+        user = UserAccount(
+            id=self.store.next_user_id,
+            display_name=display_name.strip(),
+            language=default_language,
+            notifications_enabled=True,
+        )
+        self.store.users[user.id] = user
+        self.store.next_user_id += 1
         return user
 
-    async def get_by_external_id(self, external_user_id: int) -> UserProfile | None:
-        internal_id = self.store.users_by_external.get(external_user_id)
-        if internal_id is None:
-            return None
-        return self.store.users.get(internal_id)
-
-    async def get_by_id(self, user_id: int) -> UserProfile | None:
+    async def get_by_id(self, user_id: int) -> UserAccount | None:
         return self.store.users.get(user_id)
 
     async def set_language(self, user_id: int, language: str) -> None:
@@ -75,8 +60,143 @@ class InMemoryUsersRepo:
         user.notifications_enabled = not user.notifications_enabled
         return user.notifications_enabled
 
-    async def list_notification_enabled(self) -> list[UserProfile]:
+    async def list_notification_enabled(self) -> list[UserAccount]:
         return [user for user in self.store.users.values() if user.notifications_enabled]
+
+
+class InMemoryIdentitiesRepo:
+    def __init__(self, store: InMemoryStore) -> None:
+        self.store = store
+
+    async def get_by_provider_identity(self, *, provider: str, provider_user_id: str) -> UserIdentity | None:
+        identity_id = self.store.identity_index.get((provider, provider_user_id))
+        if identity_id is None:
+            return None
+        return self.store.identities.get(identity_id)
+
+    async def list_for_user(self, user_id: int) -> list[UserIdentity]:
+        return sorted(
+            [identity for identity in self.store.identities.values() if identity.user_id == user_id],
+            key=lambda item: item.provider,
+        )
+
+    async def count_for_user(self, user_id: int) -> int:
+        return len([identity for identity in self.store.identities.values() if identity.user_id == user_id])
+
+    async def upsert_for_user(
+        self,
+        *,
+        user_id: int,
+        provider: str,
+        provider_user_id: str,
+        provider_username: str | None,
+        provider_display_name: str | None,
+    ) -> UserIdentity:
+        existing = next(
+            (
+                identity
+                for identity in self.store.identities.values()
+                if identity.user_id == user_id and identity.provider == provider
+            ),
+            None,
+        )
+        if existing is None:
+            identity = UserIdentity(
+                id=self.store.next_identity_id,
+                user_id=user_id,
+                provider=provider,
+                provider_user_id=provider_user_id,
+                provider_username=provider_username,
+                provider_display_name=provider_display_name,
+            )
+            self.store.identities[identity.id] = identity
+            self.store.next_identity_id += 1
+        else:
+            self.store.identity_index.pop((existing.provider, existing.provider_user_id), None)
+            existing.provider_user_id = provider_user_id
+            existing.provider_username = provider_username
+            existing.provider_display_name = provider_display_name
+            identity = existing
+        self.store.identity_index[(provider, provider_user_id)] = identity.id
+        return identity
+
+    async def remove_for_user(self, *, user_id: int, provider: str) -> bool:
+        identity = next(
+            (
+                item
+                for item in self.store.identities.values()
+                if item.user_id == user_id and item.provider == provider
+            ),
+            None,
+        )
+        if identity is None:
+            return False
+        self.store.identity_index.pop((identity.provider, identity.provider_user_id), None)
+        self.store.identities.pop(identity.id, None)
+        return True
+
+    async def list_reminder_targets(self, *, provider: str) -> list[ReminderTarget]:
+        targets: list[ReminderTarget] = []
+        for identity in self.store.identities.values():
+            if identity.provider != provider:
+                continue
+            user = self.store.users.get(identity.user_id)
+            if user is None or not user.notifications_enabled:
+                continue
+            targets.append(
+                ReminderTarget(
+                    user_id=user.id,
+                    provider=identity.provider,
+                    destination=identity.provider_user_id,
+                    language=user.language,
+                )
+            )
+        return targets
+
+
+class InMemoryCredentialsRepo:
+    def __init__(self, store: InMemoryStore) -> None:
+        self.store = store
+
+    async def create(
+        self,
+        *,
+        user_id: int,
+        username: str,
+        email: str | None,
+        password_hash: str,
+    ) -> LocalCredentials:
+        credentials = LocalCredentials(
+            id=self.store.next_credentials_id,
+            user_id=user_id,
+            username=username,
+            email=email,
+            password_hash=password_hash,
+        )
+        self.store.credentials[credentials.id] = credentials
+        self.store.credentials_by_username[username] = credentials.id
+        if email is not None:
+            self.store.credentials_by_email[email] = credentials.id
+        self.store.next_credentials_id += 1
+        return credentials
+
+    async def get_by_username(self, username: str) -> LocalCredentials | None:
+        credentials_id = self.store.credentials_by_username.get(username)
+        if credentials_id is None:
+            return None
+        return self.store.credentials.get(credentials_id)
+
+    async def get_by_email(self, email: str) -> LocalCredentials | None:
+        credentials_id = self.store.credentials_by_email.get(email)
+        if credentials_id is None:
+            return None
+        return self.store.credentials.get(credentials_id)
+
+    async def get_by_user_id(self, user_id: int) -> LocalCredentials | None:
+        return next((item for item in self.store.credentials.values() if item.user_id == user_id), None)
+
+    async def has_for_user(self, user_id: int) -> bool:
+        return any(item.user_id == user_id for item in self.store.credentials.values())
 
 
 class InMemoryBanksRepo:
@@ -159,6 +279,8 @@ class InMemoryLogsRepo:
 class InMemoryUnitOfWork(UnitOfWorkPort):
     def __init__(self, store: InMemoryStore) -> None:
         self.users = InMemoryUsersRepo(store)
+        self.identities = InMemoryIdentitiesRepo(store)
+        self.credentials = InMemoryCredentialsRepo(store)
         self.banks = InMemoryBanksRepo(store)
         self.cashback = InMemoryCashbackRepo(store)
         self.logs = InMemoryLogsRepo(store)
@@ -193,8 +315,8 @@ class DummyOCR:
     def __init__(self) -> None:
         self.value = "АЗС 5%"
 
-    async def extract_text(self, image_path) -> str:
-        _ = image_path
+    async def extract_text(self, upload: ImageUpload) -> str:
+        _ = upload
         return self.value
 
 

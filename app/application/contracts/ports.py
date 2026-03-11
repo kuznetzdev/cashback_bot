@@ -1,28 +1,18 @@
 from __future__ import annotations
 
 from datetime import datetime
-from pathlib import Path
 from typing import Protocol
 
-from app.domain.models import Bank, CashbackDraftItem, UserLogEntry, UserProfile
+from app.application.dto.media import ImageUpload
+from app.domain.models import Bank, CashbackDraftItem, LocalCredentials, ReminderTarget, UserAccount, UserIdentity, UserLogEntry
 from app.domain.services.ranking import RankingEntry
 
 
 class UserRepositoryPort(Protocol):
-    async def upsert(
-        self,
-        *,
-        external_user_id: int,
-        username: str | None,
-        full_name: str | None,
-        default_language: str,
-    ) -> UserProfile:
+    async def create(self, *, display_name: str, default_language: str) -> UserAccount:
         ...
 
-    async def get_by_external_id(self, external_user_id: int) -> UserProfile | None:
-        ...
-
-    async def get_by_id(self, user_id: int) -> UserProfile | None:
+    async def get_by_id(self, user_id: int) -> UserAccount | None:
         ...
 
     async def set_language(self, user_id: int, language: str) -> None:
@@ -31,7 +21,59 @@ class UserRepositoryPort(Protocol):
     async def toggle_notifications(self, user_id: int) -> bool:
         ...
 
-    async def list_notification_enabled(self) -> list[UserProfile]:
+    async def list_notification_enabled(self) -> list[UserAccount]:
+        ...
+
+
+class UserIdentityRepositoryPort(Protocol):
+    async def get_by_provider_identity(self, *, provider: str, provider_user_id: str) -> UserIdentity | None:
+        ...
+
+    async def list_for_user(self, user_id: int) -> list[UserIdentity]:
+        ...
+
+    async def count_for_user(self, user_id: int) -> int:
+        ...
+
+    async def upsert_for_user(
+        self,
+        *,
+        user_id: int,
+        provider: str,
+        provider_user_id: str,
+        provider_username: str | None,
+        provider_display_name: str | None,
+    ) -> UserIdentity:
+        ...
+
+    async def remove_for_user(self, *, user_id: int, provider: str) -> bool:
+        ...
+
+    async def list_reminder_targets(self, *, provider: str) -> list[ReminderTarget]:
+        ...
+
+
+class LocalCredentialsRepositoryPort(Protocol):
+    async def create(
+        self,
+        *,
+        user_id: int,
+        username: str,
+        email: str | None,
+        password_hash: str,
+    ) -> LocalCredentials:
+        ...
+
+    async def get_by_username(self, username: str) -> LocalCredentials | None:
+        ...
+
+    async def get_by_email(self, email: str) -> LocalCredentials | None:
+        ...
+
+    async def get_by_user_id(self, user_id: int) -> LocalCredentials | None:
+        ...
+
+    async def has_for_user(self, user_id: int) -> bool:
         ...
 
 
@@ -76,6 +118,8 @@ class LogRepositoryPort(Protocol):
 
 class UnitOfWorkPort(Protocol):
     users: UserRepositoryPort
+    identities: UserIdentityRepositoryPort
+    credentials: LocalCredentialsRepositoryPort
     banks: BankRepositoryPort
     cashback: CashbackRepositoryPort
     logs: LogRepositoryPort
@@ -94,20 +138,12 @@ class UnitOfWorkPort(Protocol):
 
 
 class OCRPort(Protocol):
-    async def extract_text(self, image_path: Path) -> str:
-        ...
-
-
-class BinarySourcePort(Protocol):
-    async def save_photo_to_temp(self, source: object) -> Path:
-        ...
-
-    async def remove_temp_file(self, path: Path) -> None:
+    async def extract_text(self, upload: ImageUpload) -> str:
         ...
 
 
 class ReminderSenderPort(Protocol):
-    async def send_monthly_reminder(self, user: UserProfile) -> None:
+    async def send_monthly_reminder(self, target: ReminderTarget) -> None:
         ...
 
 

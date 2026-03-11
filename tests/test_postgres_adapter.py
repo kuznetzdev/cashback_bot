@@ -33,11 +33,13 @@ async def test_postgres_uow_implements_ports_with_atomic_replace_and_delete() ->
     uow_factory = build_uow_factory(session_factory)
 
     async with uow_factory() as uow:
-        user = await uow.users.upsert(
-            external_user_id=777,
-            username="postgres-user",
-            full_name="Postgres User",
-            default_language="ru",
+        user = await uow.users.create(display_name="Postgres User", default_language="ru")
+        await uow.identities.upsert_for_user(
+            user_id=user.id,
+            provider="telegram",
+            provider_user_id="777",
+            provider_username="postgres-user",
+            provider_display_name="Postgres User",
         )
         bank = await uow.banks.create(user.id, "Adapter Bank")
         await uow.cashback.replace_for_bank(
@@ -101,17 +103,21 @@ async def test_postgres_uow_isolates_data_between_users() -> None:
     uow_factory = build_uow_factory(session_factory)
 
     async with uow_factory() as uow:
-        user_a = await uow.users.upsert(
-            external_user_id=101,
-            username="user-a",
-            full_name="User A",
-            default_language="ru",
+        user_a = await uow.users.create(display_name="User A", default_language="ru")
+        user_b = await uow.users.create(display_name="User B", default_language="ru")
+        await uow.identities.upsert_for_user(
+            user_id=user_a.id,
+            provider="telegram",
+            provider_user_id="101",
+            provider_username="user-a",
+            provider_display_name="User A",
         )
-        user_b = await uow.users.upsert(
-            external_user_id=202,
-            username="user-b",
-            full_name="User B",
-            default_language="ru",
+        await uow.identities.upsert_for_user(
+            user_id=user_b.id,
+            provider="telegram",
+            provider_user_id="202",
+            provider_username="user-b",
+            provider_display_name="User B",
         )
         bank_a = await uow.banks.create(user_a.id, "Shared Name")
         bank_b = await uow.banks.create(user_b.id, "Shared Name")

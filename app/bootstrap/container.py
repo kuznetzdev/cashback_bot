@@ -5,16 +5,37 @@ from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from app.adapters.auth_local import Argon2PasswordHasher
 from app.adapters.ocr_tesseract import TesseractOCRAdapter
 from app.adapters.postgres.session import create_session_factory
 from app.adapters.postgres.uow import SqlAlchemyUnitOfWork, build_uow_factory
 from app.adapters.system import SystemClock
 from app.application import ApplicationFacade
+from app.application.auth.use_cases import (
+    AuthenticateExternalIdentityUseCase,
+    AuthenticateLocalUserUseCase,
+    GetUserAccountUseCase,
+    LinkExternalIdentityUseCase,
+    ListExternalIdentitiesUseCase,
+    RegisterLocalUserUseCase,
+    UnlinkExternalIdentityUseCase,
+)
 from app.application.contracts.ports import ReminderSenderPort
 from app.application.use_cases.handle_command import HandleCommandUseCase
+from app.application.use_cases.get_bank_details import GetBankDetailsUseCase
+from app.application.use_cases.get_history import GetHistoryUseCase
+from app.application.use_cases.get_user_banks import GetUserBanksUseCase
 from app.application.use_cases.log_event import LogEventUseCase
+from app.application.use_cases.process_uploaded_image import ProcessUploadedImageUseCase
 from app.application.use_cases.send_monthly_reminders import SendMonthlyRemindersUseCase
+from app.application.use_cases.save_bank_draft import SaveBankDraftUseCase
 from app.application.use_cases.sync_user import SyncTelegramUserUseCase
+from app.application.use_cases.change_language import ChangeLanguageUseCase
+from app.application.use_cases.delete_bank import DeleteBankUseCase
+from app.application.use_cases.delete_category import DeleteCategoryUseCase
+from app.application.use_cases.get_ranking import GetRankingUseCase
+from app.application.use_cases.parse_manual_cashback import ParseManualCashbackUseCase
+from app.application.use_cases.toggle_notifications import ToggleNotificationsUseCase
 from app.bootstrap.config import Settings
 from app.domain.services.categories import CategoryService
 from app.domain.services.parsing import ParserService
@@ -67,13 +88,45 @@ def build_core_container(settings: Settings) -> CoreContainer:
 
 
 def build_application_facade(core: CoreContainer, reminder_sender: ReminderSenderPort) -> ApplicationFacade:
+    password_hasher = Argon2PasswordHasher()
+    register_local_user = RegisterLocalUserUseCase(core.uow_factory, password_hasher, default_language=core.settings.lang_default)
+    authenticate_local_user = AuthenticateLocalUserUseCase(core.uow_factory, password_hasher)
+    authenticate_external_identity = AuthenticateExternalIdentityUseCase(core.uow_factory, default_language=core.settings.lang_default)
+    link_external_identity = LinkExternalIdentityUseCase(core.uow_factory)
+    unlink_external_identity = UnlinkExternalIdentityUseCase(core.uow_factory)
+    get_user_account = GetUserAccountUseCase(core.uow_factory)
+    list_external_identities = ListExternalIdentitiesUseCase(core.uow_factory)
     sync_user = SyncTelegramUserUseCase(core.uow_factory, default_language=core.settings.lang_default)
+    parse_manual = ParseManualCashbackUseCase(core.parser)
+    process_uploaded_image = ProcessUploadedImageUseCase(core.ocr, core.parser)
+    save_bank_draft = SaveBankDraftUseCase(core.uow_factory)
+    get_user_banks = GetUserBanksUseCase(core.uow_factory)
+    get_bank_details = GetBankDetailsUseCase(core.uow_factory)
+    delete_bank = DeleteBankUseCase(core.uow_factory)
+    delete_category = DeleteCategoryUseCase(core.uow_factory, core.categories)
+    get_ranking = GetRankingUseCase(core.uow_factory, core.ranking)
+    get_history = GetHistoryUseCase(core.uow_factory)
+    change_language = ChangeLanguageUseCase(core.uow_factory)
+    toggle_notifications = ToggleNotificationsUseCase(core.uow_factory)
+    log_event = LogEventUseCase(core.uow_factory)
     handle_command = HandleCommandUseCase(
         uow_factory=core.uow_factory,
         parser=core.parser,
         categories=core.categories,
         ranking=core.ranking,
         ocr=core.ocr,
+        parse_manual_use_case=parse_manual,
+        process_uploaded_image_use_case=process_uploaded_image,
+        save_bank_draft_use_case=save_bank_draft,
+        get_user_banks_use_case=get_user_banks,
+        get_bank_details_use_case=get_bank_details,
+        delete_bank_use_case=delete_bank,
+        delete_category_use_case=delete_category,
+        get_ranking_use_case=get_ranking,
+        get_history_use_case=get_history,
+        change_language_use_case=change_language,
+        toggle_notifications_use_case=toggle_notifications,
+        log_event_use_case=log_event,
     )
     reminders = SendMonthlyRemindersUseCase(
         uow_factory=core.uow_factory,
@@ -81,5 +134,16 @@ def build_application_facade(core: CoreContainer, reminder_sender: ReminderSende
         clock=core.clock,
         reminder_hour=core.settings.reminder_hour,
     )
-    log_event = LogEventUseCase(core.uow_factory)
-    return ApplicationFacade(sync_user, handle_command, reminders, log_event)
+    return ApplicationFacade(
+        register_local_user,
+        authenticate_local_user,
+        authenticate_external_identity,
+        link_external_identity,
+        unlink_external_identity,
+        get_user_account,
+        list_external_identities,
+        sync_user,
+        handle_command,
+        reminders,
+        log_event,
+    )

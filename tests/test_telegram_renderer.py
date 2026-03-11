@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.adapters.telegram.localizer import Localizer
 from app.adapters.telegram.renderer import TelegramScreenRenderer
 from app.application.models import Action, Screen
+from app.i18n.localizer import Localizer
 
 
 def _build_renderer() -> TelegramScreenRenderer:

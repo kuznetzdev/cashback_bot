@@ -6,7 +6,8 @@ import time
 
 import pytest
 
-from app.adapters.web.auth import verify_telegram_login
+from app.adapters.auth_telegram.verifier import verify_telegram_login
+from app.application.auth.normalization import normalize_username
 from app.domain.errors import ValidationError
 
 
@@ -31,9 +32,10 @@ def test_verify_telegram_login_success() -> None:
     }
     signed = _sign_payload(payload, bot_token)
     auth = verify_telegram_login(signed, bot_token=bot_token, max_age_seconds=60)
-    assert auth.telegram_id == 42
-    assert auth.username == "demo_user"
-    assert auth.full_name == "Demo User"
+    assert auth.provider == "telegram"
+    assert auth.provider_user_id == "42"
+    assert auth.provider_username == "demo_user"
+    assert auth.provider_display_name == "Demo User"
 
 
 def test_verify_telegram_login_expired() -> None:
@@ -47,3 +49,13 @@ def test_verify_telegram_login_expired() -> None:
     with pytest.raises(ValidationError) as error:
         verify_telegram_login(signed, bot_token=bot_token, max_age_seconds=30)
     assert error.value.message_key == "errors.auth_expired"
+
+
+def test_normalize_username_is_lowercase_and_strips_spacing() -> None:
+    assert normalize_username("  Demo.User  ") == "demo.user"
+
+
+def test_normalize_username_rejects_invalid_symbols() -> None:
+    with pytest.raises(ValidationError) as error:
+        normalize_username("bad user!")
+    assert error.value.message_key == "errors.invalid_username"

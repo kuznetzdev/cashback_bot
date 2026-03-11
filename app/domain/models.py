@@ -6,13 +6,42 @@ from decimal import Decimal
 
 
 @dataclass(slots=True)
-class UserProfile:
+class UserAccount:
     id: int
-    external_user_id: int
-    username: str | None
-    full_name: str | None
+    display_name: str
     language: str
     notifications_enabled: bool
+
+
+# Temporary compatibility alias while the application transitions to UserAccount naming.
+UserProfile = UserAccount
+
+
+@dataclass(slots=True)
+class UserIdentity:
+    id: int
+    user_id: int
+    provider: str
+    provider_user_id: str
+    provider_username: str | None
+    provider_display_name: str | None
+
+
+@dataclass(slots=True)
+class LocalCredentials:
+    id: int
+    user_id: int
+    username: str
+    email: str | None
+    password_hash: str
+
+
+@dataclass(slots=True)
+class ReminderTarget:
+    user_id: int
+    provider: str
+    destination: str
+    language: str
 
 
 @dataclass(slots=True)

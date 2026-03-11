@@ -75,6 +75,26 @@ body {
   color: var(--text-subtle);
 }
 
+.auth-grid {
+  display: grid;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  text-align: left;
+}
+
+.auth-form {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid #dbe7f3;
+  border-radius: var(--radius-m);
+}
+
+.auth-form h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
 .app-header {
   display: flex;
   align-items: center;
@@ -90,6 +110,45 @@ body {
 
 .brand small {
   color: var(--text-subtle);
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.linked-accounts {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.linked-accounts-title {
+  color: var(--text-subtle);
+  font-size: 0.9rem;
+}
+
+.linked-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: rgba(16, 42, 67, 0.08);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.linked-badge-on {
+  background: rgba(19, 138, 93, 0.12);
+  color: #0d6f4a;
+}
+
+.inline-form {
+  margin: 0;
 }
 
 .toast-wrap {
@@ -257,6 +316,13 @@ textarea {
     padding-inline: var(--space-2);
   }
 
+  .app-header,
+  .header-actions,
+  .linked-accounts {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
   .screen-card,
   .input-panel {
     padding: var(--space-3);
@@ -264,6 +330,10 @@ textarea {
 }
 
 @media (min-width: 481px) and (max-width: 768px) {
+  .auth-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .app-shell {
     width: min(720px, 100%);
     margin: 0 auto;
@@ -271,6 +341,10 @@ textarea {
 }
 
 @media (min-width: 769px) {
+  .auth-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .app-shell {
     width: min(920px, 100%);
     margin: 0 auto;

@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     migration_retry_delay: float = Field(default=2.0, alias="MIGRATION_RETRY_DELAY", ge=0.1, le=30.0)
     app_enable_telegram: bool = Field(default=True, alias="APP_ENABLE_TELEGRAM")
     app_enable_web: bool = Field(default=False, alias="APP_ENABLE_WEB")
+    web_enable_telegram_auth: bool = Field(default=True, alias="WEB_ENABLE_TELEGRAM_AUTH")
     web_host: str = Field(default="0.0.0.0", alias="WEB_HOST")
     web_port: int = Field(default=8080, alias="WEB_PORT", ge=1, le=65535)
     web_base_url: str = Field(default="http://localhost:8080", alias="WEB_BASE_URL")

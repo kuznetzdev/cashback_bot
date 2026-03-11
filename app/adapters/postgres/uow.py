@@ -8,7 +8,9 @@ from app.application.contracts.ports import UnitOfWorkPort
 from app.adapters.postgres.repositories import (
     PostgresBankRepository,
     PostgresCashbackRepository,
+    PostgresLocalCredentialsRepository,
     PostgresLogRepository,
+    PostgresUserIdentityRepository,
     PostgresUserRepository,
 )
 
@@ -18,6 +20,8 @@ class SqlAlchemyUnitOfWork(UnitOfWorkPort):
         self._session_factory = session_factory
         self.session: AsyncSession | None = None
         self.users: PostgresUserRepository
+        self.identities: PostgresUserIdentityRepository
+        self.credentials: PostgresLocalCredentialsRepository
         self.banks: PostgresBankRepository
         self.cashback: PostgresCashbackRepository
         self.logs: PostgresLogRepository
@@ -25,6 +29,8 @@ class SqlAlchemyUnitOfWork(UnitOfWorkPort):
     async def __aenter__(self) -> "SqlAlchemyUnitOfWork":
         self.session = self._session_factory()
         self.users = PostgresUserRepository(self.session)
+        self.identities = PostgresUserIdentityRepository(self.session)
+        self.credentials = PostgresLocalCredentialsRepository(self.session)
         self.banks = PostgresBankRepository(self.session)
         self.cashback = PostgresCashbackRepository(self.session)
         self.logs = PostgresLogRepository(self.session)

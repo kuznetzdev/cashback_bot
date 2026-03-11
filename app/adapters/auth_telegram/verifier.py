@@ -3,20 +3,18 @@ from __future__ import annotations
 import hashlib
 import hmac
 import time
-from dataclasses import dataclass
 from typing import Mapping
 
+from app.application.auth.models import ExternalIdentityContext
 from app.domain.errors import ValidationError
 
 
-@dataclass(slots=True)
-class TelegramAuthData:
-    telegram_id: int
-    username: str | None
-    full_name: str | None
-
-
-def verify_telegram_login(payload: Mapping[str, str], *, bot_token: str, max_age_seconds: int = 86400) -> TelegramAuthData:
+def verify_telegram_login(
+    payload: Mapping[str, str],
+    *,
+    bot_token: str,
+    max_age_seconds: int = 86400,
+) -> ExternalIdentityContext:
     provided_hash = payload.get("hash")
     if not provided_hash:
         raise ValidationError("errors.invalid_auth")
@@ -37,19 +35,20 @@ def verify_telegram_login(payload: Mapping[str, str], *, bot_token: str, max_age
     if not hmac.compare_digest(expected_hash, provided_hash):
         raise ValidationError("errors.invalid_auth")
 
-    raw_id = payload.get("id")
-    if not raw_id:
+    provider_user_id = payload.get("id")
+    if not provider_user_id:
         raise ValidationError("errors.invalid_auth")
-    try:
-        telegram_id = int(raw_id)
-    except ValueError as error:
-        raise ValidationError("errors.invalid_auth") from error
 
     username = payload.get("username")
     first_name = payload.get("first_name", "").strip()
     last_name = payload.get("last_name", "").strip()
-    full_name = " ".join(part for part in (first_name, last_name) if part).strip() or None
-    return TelegramAuthData(telegram_id=telegram_id, username=username, full_name=full_name)
+    display_name = " ".join(part for part in (first_name, last_name) if part).strip() or None
+    return ExternalIdentityContext(
+        provider="telegram",
+        provider_user_id=provider_user_id,
+        provider_username=username,
+        provider_display_name=display_name,
+    )
 
 
 def _build_data_check_string(payload: Mapping[str, str]) -> str:

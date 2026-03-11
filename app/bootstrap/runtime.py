@@ -14,20 +14,18 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.adapters.scheduler import ReminderLoop
+from app.adapters.telegram.reminder_sender import TelegramReminderSender
+from app.adapters.telegram.renderer import TelegramScreenRenderer
+from app.adapters.telegram.router import TelegramDependencies, build_router
 from app.adapters.system import NoopReminderSender
-from app.adapters.telegram import (
-    Localizer,
-    TelegramDependencies,
-    TelegramReminderSender,
-    TelegramScreenRenderer,
-    build_router,
-)
-from app.adapters.web import WebDependencies, create_web_app, run_web_server
+from app.adapters.web.app import WebDependencies, create_web_app
+from app.adapters.web.server import run_web_server
 from app.application import ApplicationFacade
 from app.bootstrap.config import Settings, get_settings
 from app.bootstrap.container import build_application_facade, build_core_container
 from app.bootstrap.db_startup import ensure_database_exists
 from app.bootstrap.logger import configure_logging
+from app.i18n.localizer import Localizer
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +81,7 @@ async def run_app() -> None:
             temp_dir=settings.temp_dir,
             bot_token=settings.bot_token,
             bot_username=settings.telegram_bot_username,
+            telegram_auth_enabled=settings.web_enable_telegram_auth,
             web_base_url=settings.web_base_url,
             max_upload_size=min(settings.web_max_upload_size, settings.max_file_size),
             secure_cookies=settings.web_secure_cookies,
@@ -136,7 +135,6 @@ async def _run_telegram_adapter(
         facade=facade,
         renderer=renderer,
         localizer=localizer,
-        temp_dir=settings.temp_dir,
         default_language=settings.lang_default,
     )
     dp.include_router(build_router(telegram_deps))
@@ -208,11 +206,12 @@ def _validate_startup_settings(settings: Settings) -> None:
     if not settings.app_enable_telegram and not settings.app_enable_web:
         raise RuntimeError("At least one adapter must be enabled (APP_ENABLE_TELEGRAM or APP_ENABLE_WEB).")
     token = settings.bot_token.strip()
-    if (settings.app_enable_telegram or settings.app_enable_web) and (
+    telegram_token_required = settings.app_enable_telegram or (settings.app_enable_web and settings.web_enable_telegram_auth)
+    if telegram_token_required and (
         not token or token.endswith(":TEST_TOKEN") or "replace_me" in token.lower()
     ):
         raise RuntimeError("BOT_TOKEN is not configured. Set a valid Telegram bot token in .env or environment.")
-    if settings.app_enable_web and not settings.telegram_bot_username.strip():
+    if settings.app_enable_web and settings.web_enable_telegram_auth and not settings.telegram_bot_username.strip():
         raise RuntimeError("TELEGRAM_BOT_USERNAME is required when APP_ENABLE_WEB=true.")
     if settings.app_enable_web and (
         settings.web_session_secret == "change-me-session-secret"

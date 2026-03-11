@@ -21,7 +21,7 @@
     "interrupt_flow": "Unsaved draft"
   },
   "messages": {
-    "processing": "⏳ Processing...",
+    "processing": "Processing...",
     "saved_bank": "Bank saved.",
     "deleted_bank": "Bank deleted.",
     "deleted_category": "Deleted categories: {count}. Affected banks: {banks}.",
@@ -30,6 +30,7 @@
     "no_ranking_data": "Not enough data to build ranking.",
     "reminder_monthly": "Don't forget to update your cashback categories for the new month!",
     "web_login_hint": "Sign in with Telegram and manage cashback categories from phone or desktop.",
+    "web_auth_hint": "Sign in with a local account. Telegram remains available as an optional linked identity.",
     "upload_hint": "Upload a screenshot from your banking app. Crop extra regions for better OCR.",
     "ocr_hint": "Hint: crop the screenshot, increase contrast, and try again.",
     "confirm_discard_draft": "You have unsaved changes.\nChoose what to do before going to {target}.",
@@ -56,7 +57,7 @@
     "edit_category": "Edit Category",
     "edit_percent": "Edit Percent",
     "confirm_delete": "Confirm Delete",
-    "language_ru": "Русский",
+    "language_ru": "Russian",
     "language_en": "English",
     "toggle_notifications_on": "Disable Notifications",
     "toggle_notifications_off": "Enable Notifications",
@@ -66,12 +67,14 @@
     "logout": "Logout",
     "continue_editing": "Continue editing",
     "save_and_continue": "Save and continue",
-    "discard_and_continue": "Discard and continue"
+    "discard_and_continue": "Discard and continue",
+    "link_telegram": "Link Telegram",
+    "unlink_telegram": "Unlink Telegram"
   },
   "labels": {
     "notifications_on": "enabled",
     "notifications_off": "disabled",
-    "language_ru": "Русский",
+    "language_ru": "Russian",
     "language_en": "English",
     "upload_title": "Upload Screenshot",
     "manual_input_title": "Manual Category Input",
@@ -88,7 +91,10 @@
     "target_settings": "settings",
     "target_history": "history",
     "target_cancel": "cancel flow",
-    "target_other": "another section"
+    "target_other": "another section",
+    "linked_accounts": "Linked accounts",
+    "telegram_linked": "Telegram linked",
+    "telegram_unlinked": "Telegram not linked"
   },
   "errors": {
     "invalid_bank_name": "Invalid bank name.",
@@ -107,6 +113,17 @@
     "ocr_timeout": "Image recognition timeout.",
     "invalid_auth": "Telegram authorization could not be verified.",
     "auth_expired": "Authorization session expired. Please sign in again.",
-    "unexpected": "Internal error. Try again."
+    "unexpected": "Internal error. Try again.",
+    "invalid_username": "Invalid username.",
+    "invalid_email": "Invalid email.",
+    "invalid_password": "Password must be at least 8 characters.",
+    "invalid_display_name": "Display name is required.",
+    "invalid_credentials": "Wrong username or password.",
+    "username_taken": "Username is already taken.",
+    "email_taken": "Email is already taken.",
+    "identity_not_linked": "Telegram account is not linked. Sign in locally first.",
+    "identity_already_linked": "This Telegram account is already linked to another user.",
+    "identity_not_found": "Linked identity was not found.",
+    "last_identity_unlink_forbidden": "Add local credentials before unlinking the last external identity."
   }
 }

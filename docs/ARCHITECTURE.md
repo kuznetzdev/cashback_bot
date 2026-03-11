@@ -2,223 +2,214 @@
 
 ## Purpose
 
-This project is built as a core-first platform where Telegram and web are external adapters. The same business workflows must be reusable from another transport, such as a REST API or another UI, without rewriting the application logic.
+The system is built as a platform core with thin delivery adapters.
+Business rules, workflow state, ranking, parsing, and persistence contracts live outside Telegram and outside HTTP.
 
-## Layered Model
+Current primary platform entry point: web with local credentials.
+Current secondary adapter: Telegram.
+
+## Layer Map
 
 ```mermaid
 flowchart LR
-    TG["Telegram Adapter"] --> APP["Application Layer"]
-    WEB["Web Adapter"] --> APP
+    WEB["Web Adapter"] --> APP["Application Layer"]
+    TG["Telegram Adapter"] --> APP
     SCHED["Reminder Scheduler"] --> APP
     APP --> DOM["Domain Layer"]
-    APP --> PORTS["Ports"]
+    APP --> PORTS["Application Ports"]
     PORTS --> PG["PostgreSQL Adapter"]
     PORTS --> OCR["Tesseract OCR Adapter"]
-    PORTS --> SEND["Reminder Sender Adapter"]
-    PORTS --> CLOCK["Clock Adapter"]
+    PORTS --> AUTHL["Local Auth Adapter"]
+    PORTS --> AUTHT["Telegram Auth Adapter"]
+    PORTS --> REM["Reminder Sender Adapter"]
 ```
 
-## Layer Responsibilities
+## Responsibilities
 
 ### Domain
 
-Location: [app/domain](C:\Users\Kuznetz\Desktop\proga\cashback_bot\app\domain)
+Location: `app/domain`
 
-Contains pure logic and does not know about Telegram, FastAPI, SQLAlchemy sessions, or transport state.
+Contains transport-neutral business entities and domain rules.
 
-Key responsibilities:
+Examples:
 
-- domain models such as `UserProfile`, `CashbackDraftItem`, `BankAggregate`
-- enums and domain errors
-- category normalization and synonym mapping
-- natural-language parsing helpers
-- ranking rules and tie handling
+- `UserAccount`
+- `UserIdentity`
+- `LocalCredentials`
+- `ReminderTarget`
+- `BankAggregate`
+- `CashbackDraftItem`
+- category normalization and ranking services
+
+The domain must not import FastAPI, aiogram, SQLAlchemy, or adapter code.
 
 ### Application
 
-Location: [app/application](C:\Users\Kuznetz\Desktop\proga\cashback_bot\app\application)
+Location: `app/application`
 
-Contains use cases and workflow orchestration. This is the behavioral center of the system.
+Contains use cases, workflow state, transport-neutral screen models, and infrastructure ports.
 
-Key responsibilities:
+Main areas:
 
-- `UserCommand`, `Screen`, `Action`, `WorkflowState`, `WorkflowResult`
-- `handle_command(...)` workflow execution
-- user sync
-- reminder dispatch policy
-- logging application events
-- persistence and OCR access through ports only
+- `app/application/auth`: registration, login, external identity auth, link, unlink
+- `app/application/dto`: neutral DTOs such as `ImageUpload`
+- `app/application/use_cases`: business operations for banks, history, reminders, OCR processing
+- `app/application/models`: `Screen`, `Action`, `Effect`, `WorkflowState`, `WorkflowResult`
 
-Core contracts:
-
-```python
-sync_user(context) -> UserProfile
-handle_command(user, workflow_state, command) -> WorkflowResult
-send_monthly_reminders() -> int
-log_event(user_id, action, payload) -> None
-```
+Important rule:
+application code may depend on domain and application contracts only.
 
 ### Adapters
 
-Location: [app/adapters](C:\Users\Kuznetz\Desktop\proga\cashback_bot\app\adapters)
+Location: `app/adapters`
 
-Implement infrastructure and transport integration.
+Concrete integration layer.
 
-- `postgres`: SQLAlchemy models, repositories, unit of work, session factory
-- `telegram`: update mapping, callback decoding, inline screen rendering, FSM persistence bridge
-- `web`: FastAPI app, Telegram Login verification, SSR templates, session-backed workflow persistence
-- `ocr_tesseract`: image preprocessing and OCR extraction
-- `scheduler`: reminder async loop
-- `system`: clock and reminder sender helpers
+- `postgres`: repositories, unit of work, SQLAlchemy models
+- `auth_local`: password hashing and verification
+- `auth_telegram`: Telegram Login verification
+- `telegram`: aiogram routing and rendering
+- `web`: FastAPI routes, sessions, SSR templates
+- `ocr_tesseract`: image-to-text extraction from `ImageUpload`
+- `system`: reminder delivery helpers
+
+Adapters may depend on application contracts.
+Application and domain must not depend on adapters.
 
 ### Bootstrap
 
-Location: [app/bootstrap](C:\Users\Kuznetz\Desktop\proga\cashback_bot\app\bootstrap)
+Location: `app/bootstrap`
 
-Builds the runtime graph.
+Owns runtime wiring only:
 
-Responsibilities:
+- settings loading
+- logging
+- database readiness
+- migrations
+- container assembly
+- adapter startup
 
-- load settings
-- configure logging
-- ensure database exists
-- build core container and facade
-- apply migrations
-- run enabled adapters
+## Identity Model
 
-## Main Runtime Flow
+The platform no longer treats Telegram as the canonical user identity.
+
+Tables:
+
+- `users`: platform account
+- `user_identities`: linked external identities such as Telegram
+- `local_credentials`: local username/email/password hash
+
+Design consequences:
+
+- a web user can exist without Telegram
+- a Telegram identity can be linked to an existing platform account
+- reminder routing is derived from linked identities, not from columns on `users`
+
+## Authentication Model
+
+### Web
+
+Supports:
+
+- local registration
+- local login
+- logout
+- Telegram identity link and unlink
+
+Unlinked Telegram callbacks are not allowed to silently create arbitrary web sessions.
+They are accepted only for an already linked identity or for explicit linking from an authenticated session.
+
+### Telegram
+
+Telegram can still create or restore an account through external identity authentication with `provider="telegram"`.
+This preserves bot-first compatibility while keeping the platform model neutral.
+
+## Workflow Model
+
+The product remains screen-driven.
+Adapters translate transport events into a shared `UserCommand` contract and render the returned `Screen`.
+
+`WorkflowState` stores draft and navigation state such as:
+
+- selected bank
+- draft items
+- pending input kind
+- edit pointer
+- interrupt target
+
+`Screen` contains:
+
+- screen id
+- title/body localization keys
+- action list
+- optional input expectation
+- optional layout hint
+
+This allows Telegram and web to reuse the same logical workflow semantics.
+
+## File Upload Model
+
+OCR no longer depends on filesystem paths in the application contract.
+
+The application works with `ImageUpload`:
+
+- `content: bytes`
+- `filename: str`
+- `content_type: str`
+
+Any temporary file handling stays inside the concrete adapter.
+
+## Reminder Delivery
+
+Monthly reminders are now resolved through reminder targets from linked identities.
+
+Current operational behavior:
+
+- the reminder use case queries `user_identities` for Telegram targets
+- the system sender delivers `ReminderTarget`
+- transport routing is adapter-owned
+
+This removes the old assumption that `users.telegram_user_id` is the only delivery address.
+
+## Runtime Flow
 
 ```mermaid
 sequenceDiagram
     participant Main as app.main
     participant Runtime as bootstrap.runtime
     participant DB as PostgreSQL
-    participant Core as ApplicationFacade
-    participant Tg as Telegram Adapter
+    participant Facade as ApplicationFacade
     participant Web as Web Adapter
+    participant Tg as Telegram Adapter
 
     Main->>Runtime: run_app()
-    Runtime->>DB: ensure database exists
     Runtime->>DB: wait for connection
     Runtime->>DB: alembic upgrade head
-    Runtime->>Core: build container + facade
-    Runtime->>Tg: start if enabled
+    Runtime->>Facade: build container
     Runtime->>Web: start if enabled
+    Runtime->>Tg: start if enabled
 ```
 
-## Workflow Model
+## Invariants
 
-The product is screen-driven, not transport-driven.
+- `app.domain` imports no adapter or framework code.
+- `app.application` imports no adapter package or ORM model.
+- `app.adapters.web` does not import `app.adapters.telegram`.
+- shared localization lives in `app.i18n`.
+- adapters are replaceable without rewriting business rules.
 
-`WorkflowState` stores:
+## Known Limitation
 
-- current mode (`create`, `edit`, or `None`)
-- selected bank reference
-- draft cashback items
-- editing pointer
-- pending input kind
-- temporary payload for incomplete actions
+The refactor extracted major business operations out of the workflow layer, but `HandleCommandUseCase` is still the main orchestration entry point and remains larger than the target end state.
 
-`Screen` describes what the UI must render:
+What is already done:
 
-- `id`
-- `title_key`
-- `body_key`
-- `body_params`
-- `actions`
-- `expects_input`
-- `layout_hint`
+- auth split out into dedicated use cases
+- bank/history/reminder operations split into dedicated use cases
+- OCR moved behind transport-neutral upload DTOs
 
-`Action` describes what the UI can submit back:
+What remains for a later wave:
 
-- `command`
-- `label_key`
-- `payload`
-- `variant`
-- `group`
-- `destructive`
-
-This lets Telegram and web render the same logical screen with different transport behavior.
-
-## Telegram Flow
-
-Location: [app/adapters/telegram/router.py](C:\Users\Kuznetz\Desktop\proga\cashback_bot\app\adapters\telegram\router.py)
-
-High-level flow:
-
-1. Map message or callback to `UserCommand`.
-2. Load workflow state from FSM storage.
-3. Call `facade.handle_command(...)`.
-4. Save updated workflow state.
-5. Render the returned `Screen`.
-6. Apply side effects such as transient status messages and event logs.
-
-Telegram-specific concerns stay in the adapter:
-
-- callback parsing
-- inline keyboard lifecycle
-- temporary photo download
-- FSM storage
-
-## Web Flow
-
-Location: [app/adapters/web/app.py](C:\Users\Kuznetz\Desktop\proga\cashback_bot\app\adapters\web\app.py)
-
-High-level flow:
-
-1. Authenticate user with Telegram Login widget.
-2. Persist user profile, workflow state, and last screen in session.
-3. Convert form submit or upload into `UserCommand`.
-4. Call the same application facade.
-5. Render `Screen` via SSR template.
-
-Web-specific concerns stay in the adapter:
-
-- session cookies
-- Telegram auth verification
-- HTML templates and CSS
-- file upload handling
-
-## Persistence Model
-
-The durable database stores current user data and business history, not UI session state.
-
-Tables:
-
-- `users`
-- `banks`
-- `cashback_items`
-- `user_logs`
-
-Important rule:
-
-- bank updates replace the full `cashback_items` set atomically inside a transaction
-
-Transport session state is intentionally non-durable:
-
-- Telegram flow state lives in FSM memory storage
-- Web flow state lives in signed session storage
-
-## Error Model
-
-Domain and validation failures bubble as domain errors and are rendered by adapters as localized messages.
-
-Examples:
-
-- file too large
-- broken image
-- OCR returned no usable text
-- invalid manual percent
-- bank or category not found
-- unknown command
-
-Operational failures are logged and surfaced as short user-facing errors without crashing the process.
-
-## Architectural Invariants
-
-- Domain must not import `aiogram`, `fastapi`, `sqlalchemy`, or transport session state.
-- Application must not depend on ORM models or `AsyncSession`.
-- Adapters may depend on application contracts, never the other way around.
-- Telegram and web must use the same `handle_command(...)` core semantics.
-- UI navigation must not create dead ends; every screen needs a safe exit path.
+- move scenario orchestration from `HandleCommandUseCase` into a dedicated `app/application/workflow` package
+- reduce command branching and presentation helpers inside that class

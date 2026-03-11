@@ -3,15 +3,15 @@ from __future__ import annotations
 from datetime import datetime
 
 from app.application.use_cases.send_monthly_reminders import SendMonthlyRemindersUseCase
-from app.domain.models import UserProfile
+from app.domain.models import ReminderTarget
 
 
 class FakeSender:
     def __init__(self) -> None:
-        self.sent_to: list[int] = []
+        self.sent_to: list[str] = []
 
-    async def send_monthly_reminder(self, user: UserProfile) -> None:
-        self.sent_to.append(user.external_user_id)
+    async def send_monthly_reminder(self, target: ReminderTarget) -> None:
+        self.sent_to.append(target.destination)
 
 
 class FakeClock:
@@ -24,13 +24,14 @@ class FakeClock:
 
 async def test_monthly_reminder_is_deduplicated_by_log_period(uow_factory) -> None:
     async with uow_factory() as uow:
-        user = await uow.users.upsert(
-            external_user_id=999,
-            username="user",
-            full_name="User",
-            default_language="ru",
+        user = await uow.users.create(display_name="User", default_language="ru")
+        await uow.identities.upsert_for_user(
+            user_id=user.id,
+            provider="telegram",
+            provider_user_id="999",
+            provider_username="user",
+            provider_display_name="User",
         )
-        user.notifications_enabled = True
         await uow.commit()
 
     sender = FakeSender()
@@ -46,4 +47,4 @@ async def test_monthly_reminder_is_deduplicated_by_log_period(uow_factory) -> No
 
     assert sent_first == 1
     assert sent_second == 0
-    assert sender.sent_to == [999]
+    assert sender.sent_to == ["999"]

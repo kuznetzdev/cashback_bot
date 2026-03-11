@@ -24,11 +24,47 @@ class UserModel(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True, autoincrement=True)
-    telegram_user_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False)
+    display_name: Mapped[str] = mapped_column(Text, nullable=False)
+    telegram_user_id: Mapped[int | None] = mapped_column(BigInteger, unique=True, nullable=True)
     username: Mapped[str | None] = mapped_column(Text, nullable=True)
     full_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     language: Mapped[str] = mapped_column(String(8), nullable=False, default="ru")
     notifications_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(), nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(), nullable=False, default=utcnow, onupdate=utcnow)
+
+
+class UserIdentityModel(Base):
+    __tablename__ = "user_identities"
+    __table_args__ = (
+        UniqueConstraint("provider", "provider_user_id", name="uq_user_identities_provider_identity"),
+        UniqueConstraint("user_id", "provider", name="uq_user_identities_user_provider"),
+        Index("ix_user_identities_user_id", "user_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    provider_user_id: Mapped[str] = mapped_column(Text, nullable=False)
+    provider_username: Mapped[str | None] = mapped_column(Text, nullable=True)
+    provider_display_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(), nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(), nullable=False, default=utcnow, onupdate=utcnow)
+
+
+class LocalCredentialsModel(Base):
+    __tablename__ = "local_credentials"
+    __table_args__ = (
+        UniqueConstraint("user_id", name="uq_local_credentials_user_id"),
+        UniqueConstraint("username", name="uq_local_credentials_username"),
+        UniqueConstraint("email", name="uq_local_credentials_email"),
+    )
+
+    id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    username: Mapped[str] = mapped_column(String(64), nullable=False)
+    email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    password_hash: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(), nullable=False, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(), nullable=False, default=utcnow, onupdate=utcnow)
 

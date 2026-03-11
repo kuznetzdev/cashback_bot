@@ -5,25 +5,25 @@ import logging
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
-from uuid import uuid4
 
-import aiofiles
 from fastapi import FastAPI, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.adapters.telegram.localizer import Localizer
-from app.adapters.web.auth import verify_telegram_login
+from app.adapters.auth_telegram import verify_telegram_login
 from app.application import ApplicationFacade
-from app.application.models import Action, Effect, Screen, UserCommand, UserContext, WorkflowResult, WorkflowState
+from app.application.auth.models import LocalAuthenticationCommand, LocalRegistrationCommand
+from app.application.dto.media import ImageUpload
+from app.application.models import Action, Effect, Screen, UserCommand, WorkflowResult, WorkflowState
 from app.domain.errors import DomainError
-from app.domain.models import UserProfile
+from app.domain.models import UserAccount, UserIdentity
+from app.i18n.localizer import Localizer
 
 logger = logging.getLogger(__name__)
 
-SESSION_USER_KEY = "web_user"
+SESSION_USER_ID_KEY = "web_user_id"
 SESSION_STATE_KEY = "workflow_state"
 SESSION_SCREEN_KEY = "screen_cache"
 DEFAULT_ACTIONS_LIMIT = 8
@@ -37,6 +37,7 @@ class WebDependencies:
     temp_dir: Path
     bot_token: str
     bot_username: str
+    telegram_auth_enabled: bool
     web_base_url: str
     max_upload_size: int
     secure_cookies: bool
@@ -60,53 +61,86 @@ def create_web_app(deps: WebDependencies) -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse)
     async def landing(request: Request) -> Response:
-        user = _get_user_from_session(request)
+        user = await _get_current_user(request, deps)
         if user is not None:
             return RedirectResponse(url="/app", status_code=303)
-        language = deps.default_language
-        callback_url = f"{deps.web_base_url.rstrip('/')}/auth/telegram/callback"
-        return templates.TemplateResponse(
-            request=request,
-            name="landing.html",
-            context={
-                "language": language,
-                "title": "Cashback Analyzer",
-                "subtitle": deps.localizer.t("messages.web_login_hint", language),
-                "bot_username": deps.bot_username,
-                "auth_url": callback_url,
-            },
-        )
+        return _render_landing(request, deps, templates)
+
+    @app.post("/auth/register")
+    async def register(request: Request) -> Response:
+        form = await request.form()
+        try:
+            user = await deps.facade.register_local_user(
+                LocalRegistrationCommand(
+                    username=str(form.get("username", "")),
+                    password=str(form.get("password", "")),
+                    display_name=_clean_optional(form.get("display_name")),
+                    email=_clean_optional(form.get("email")),
+                )
+            )
+        except DomainError as error:
+            return _render_landing(request, deps, templates, error=error, status_code=400)
+        request.session.clear()
+        _persist_authenticated_user(request, user.id)
+        return RedirectResponse(url="/app", status_code=303)
+
+    @app.post("/auth/login")
+    async def login(request: Request) -> Response:
+        form = await request.form()
+        try:
+            user = await deps.facade.authenticate_local_user(
+                LocalAuthenticationCommand(
+                    username=str(form.get("username", "")),
+                    password=str(form.get("password", "")),
+                )
+            )
+        except DomainError as error:
+            return _render_landing(request, deps, templates, error=error, status_code=401)
+        request.session.clear()
+        _persist_authenticated_user(request, user.id)
+        return RedirectResponse(url="/app", status_code=303)
 
     @app.get("/auth/telegram/callback")
     async def telegram_callback(request: Request) -> Response:
-        payload = {key: value for key, value in request.query_params.items()}
+        if not deps.telegram_auth_enabled:
+            return RedirectResponse(url="/", status_code=303)
         try:
-            auth = verify_telegram_login(payload, bot_token=deps.bot_token)
-            context = UserContext(
-                external_user_id=auth.telegram_id,
-                username=auth.username,
-                full_name=auth.full_name,
+            identity = verify_telegram_login(
+                {key: value for key, value in request.query_params.items()},
+                bot_token=deps.bot_token,
             )
-            user = await deps.facade.sync_user(context, log_action="web_login")
-            result = await deps.facade.handle_command(user, WorkflowState(), UserCommand(name="open_home"))
-            _persist_workflow(request, result)
+            current_user = await _get_current_user(request, deps)
+            if current_user is None:
+                user = await deps.facade.authenticate_external_identity(
+                    identity,
+                    create_user_if_missing=False,
+                    log_action="web_telegram_login",
+                )
+                request.session.clear()
+                _persist_authenticated_user(request, user.id)
+            else:
+                await deps.facade.link_external_identity(user_id=current_user.id, identity=identity)
             return RedirectResponse(url="/app", status_code=303)
         except DomainError as error:
-            language = deps.default_language
-            callback_url = f"{deps.web_base_url.rstrip('/')}/auth/telegram/callback"
-            return templates.TemplateResponse(
+            return _render_landing(request, deps, templates, error=error, status_code=401)
+
+    @app.post("/auth/telegram/unlink")
+    async def unlink_telegram(request: Request) -> Response:
+        user = await _get_current_user(request, deps)
+        if user is None:
+            return RedirectResponse(url="/", status_code=303)
+        try:
+            await deps.facade.unlink_external_identity(user_id=user.id, provider="telegram")
+        except DomainError as error:
+            return await _render_with_domain_error(
+                deps=deps,
+                templates=templates,
                 request=request,
-                name="landing.html",
-                context={
-                    "language": language,
-                    "title": "Cashback Analyzer",
-                    "subtitle": deps.localizer.t("messages.web_login_hint", language),
-                    "bot_username": deps.bot_username,
-                    "auth_url": callback_url,
-                    "error_message": deps.localizer.t(error.message_key, language, error.payload),
-                },
-                status_code=401,
+                user=user,
+                state=_get_state_from_session(request),
+                error=error,
             )
+        return RedirectResponse(url="/app", status_code=303)
 
     @app.post("/auth/logout")
     async def logout(request: Request) -> Response:
@@ -115,7 +149,7 @@ def create_web_app(deps: WebDependencies) -> FastAPI:
 
     @app.get("/app", response_class=HTMLResponse)
     async def app_home(request: Request) -> Response:
-        user = _get_user_from_session(request)
+        user = await _get_current_user(request, deps)
         if user is None:
             return RedirectResponse(url="/", status_code=303)
         state = _get_state_from_session(request)
@@ -126,6 +160,7 @@ def create_web_app(deps: WebDependencies) -> FastAPI:
             user = result.user
             state = result.state
             screen = result.screen
+        identities = await deps.facade.list_external_identities(user_id=user.id)
         return templates.TemplateResponse(
             request=request,
             name="app.html",
@@ -135,6 +170,7 @@ def create_web_app(deps: WebDependencies) -> FastAPI:
                 user=user,
                 state=state,
                 screen=screen,
+                identities=identities,
                 status_messages=[],
                 error_message=None,
             ),
@@ -142,14 +178,13 @@ def create_web_app(deps: WebDependencies) -> FastAPI:
 
     @app.post("/app/action", response_class=HTMLResponse)
     async def app_action(request: Request) -> Response:
-        user = _get_user_from_session(request)
+        user = await _get_current_user(request, deps)
         if user is None:
             return RedirectResponse(url="/", status_code=303)
         state = _get_state_from_session(request)
         form = await request.form()
         command_name = str(form.get("command", "")).strip()
-        payload_raw = str(form.get("payload_json", "{}"))
-        payload = _parse_payload(payload_raw)
+        payload = _parse_payload(str(form.get("payload_json", "{}")))
         if not command_name:
             return await _render_with_domain_error(
                 deps=deps,
@@ -170,24 +205,23 @@ def create_web_app(deps: WebDependencies) -> FastAPI:
 
     @app.post("/app/input", response_class=HTMLResponse)
     async def app_input(request: Request) -> Response:
-        user = _get_user_from_session(request)
+        user = await _get_current_user(request, deps)
         if user is None:
             return RedirectResponse(url="/", status_code=303)
         state = _get_state_from_session(request)
         form = await request.form()
-        text = str(form.get("text", ""))
         return await _execute_and_render(
             deps=deps,
             templates=templates,
             request=request,
             user=user,
             state=state,
-            command=UserCommand(name="submit_text", payload={"text": text}),
+            command=UserCommand(name="submit_text", payload={"text": str(form.get("text", ""))}),
         )
 
     @app.post("/app/upload", response_class=HTMLResponse)
     async def app_upload(request: Request, file: UploadFile) -> Response:
-        user = _get_user_from_session(request)
+        user = await _get_current_user(request, deps)
         if user is None:
             return RedirectResponse(url="/", status_code=303)
         state = _get_state_from_session(request)
@@ -219,25 +253,23 @@ def create_web_app(deps: WebDependencies) -> FastAPI:
                 state=state,
                 error=DomainError("errors.broken_image"),
             )
-        deps.temp_dir.mkdir(parents=True, exist_ok=True)
-        suffix = Path(file.filename or "upload.jpg").suffix or ".jpg"
-        temp_path = deps.temp_dir / f"web_{uuid4().hex}{suffix}"
-        try:
-            async with aiofiles.open(temp_path, "wb") as temp_file:
-                await temp_file.write(data)
-            return await _execute_and_render(
-                deps=deps,
-                templates=templates,
-                request=request,
-                user=user,
-                state=state,
-                command=UserCommand(name="submit_photo_path", payload={"path": str(temp_path)}),
-            )
-        finally:
-            try:
-                temp_path.unlink(missing_ok=True)
-            except OSError as error:
-                logger.warning("Failed to remove temp upload file %s: %s", temp_path, error)
+        return await _execute_and_render(
+            deps=deps,
+            templates=templates,
+            request=request,
+            user=user,
+            state=state,
+            command=UserCommand(
+                name="submit_uploaded_image",
+                payload={
+                    "upload": ImageUpload(
+                        content=data,
+                        filename=file.filename or "upload.jpg",
+                        content_type=file.content_type or "image/jpeg",
+                    )
+                },
+            ),
+        )
 
     return app
 
@@ -247,7 +279,7 @@ async def _execute_and_render(
     deps: WebDependencies,
     templates: Jinja2Templates,
     request: Request,
-    user: UserProfile,
+    user: UserAccount,
     state: WorkflowState,
     command: UserCommand,
 ) -> Response:
@@ -265,6 +297,7 @@ async def _execute_and_render(
         )
     status_messages = await _apply_effects(deps, result.user, result.effects)
     _persist_workflow(request, result)
+    identities = await deps.facade.list_external_identities(user_id=result.user.id)
     return templates.TemplateResponse(
         request=request,
         name="app.html",
@@ -274,6 +307,7 @@ async def _execute_and_render(
             user=result.user,
             state=result.state,
             screen=result.screen,
+            identities=identities,
             status_messages=status_messages,
             error_message=None,
         ),
@@ -285,7 +319,7 @@ async def _render_with_domain_error(
     deps: WebDependencies,
     templates: Jinja2Templates,
     request: Request,
-    user: UserProfile,
+    user: UserAccount,
     state: WorkflowState,
     error: DomainError,
 ) -> Response:
@@ -297,9 +331,9 @@ async def _render_with_domain_error(
         state = fallback.state
         screen = fallback.screen
     error_message = deps.localizer.t(error.message_key, user.language, error.payload)
-    hint = deps.localizer.t("messages.ocr_hint", user.language) if error.message_key == "errors.ocr_empty" else None
-    if hint:
-        error_message = f"{error_message}\n{hint}"
+    if error.message_key == "errors.ocr_empty":
+        error_message = f"{error_message}\n{deps.localizer.t('messages.ocr_hint', user.language)}"
+    identities = await deps.facade.list_external_identities(user_id=user.id)
     return templates.TemplateResponse(
         request=request,
         name="app.html",
@@ -309,13 +343,14 @@ async def _render_with_domain_error(
             user=user,
             state=state,
             screen=screen,
+            identities=identities,
             status_messages=[],
             error_message=error_message,
         ),
     )
 
 
-async def _apply_effects(deps: WebDependencies, user: UserProfile, effects: list[Effect]) -> list[str]:
+async def _apply_effects(deps: WebDependencies, user: UserAccount, effects: list[Effect]) -> list[str]:
     messages: list[str] = []
     for effect in effects:
         if effect.kind == "show_status":
@@ -347,9 +382,10 @@ def _build_context(
     *,
     deps: WebDependencies,
     request: Request,
-    user: UserProfile,
+    user: UserAccount,
     state: WorkflowState,
     screen: Screen,
+    identities: list[UserIdentity],
     status_messages: list[str],
     error_message: str | None,
 ) -> dict[str, object]:
@@ -358,7 +394,7 @@ def _build_context(
     visible_actions, has_more_actions, next_actions_limit = _paginate_actions(screen.actions, actions_limit)
     action_views = [_to_action_view(deps, action, language) for action in visible_actions]
     _ensure_mobile_navigation(action_views, deps, language)
-    input_panel = _build_input_panel(screen.expects_input, deps, language)
+    telegram_linked = any(identity.provider == "telegram" for identity in identities)
     return {
         "language": language,
         "app_title": "Cashback Analyzer",
@@ -371,13 +407,22 @@ def _build_context(
         "actions": action_views,
         "has_more_actions": has_more_actions,
         "next_actions_limit": next_actions_limit,
-        "input_panel": input_panel,
+        "input_panel": _build_input_panel(screen.expects_input, deps, language),
         "upload_max_bytes": deps.max_upload_size,
         "state_pending_kind": state.pending_input_kind,
-        "user_name": user.full_name or user.username or str(user.external_user_id),
+        "user_name": user.display_name,
         "logout_label": deps.localizer.t("buttons.logout", language),
         "show_more_label": deps.localizer.t("buttons.show_more", language),
         "processing_label": deps.localizer.t("messages.processing", language),
+        "telegram_enabled": deps.telegram_auth_enabled,
+        "telegram_linked": telegram_linked,
+        "telegram_auth_url": _telegram_callback_url(deps),
+        "bot_username": deps.bot_username,
+        "linked_accounts_label": deps.localizer.t("labels.linked_accounts", language),
+        "telegram_linked_label": deps.localizer.t("labels.telegram_linked", language),
+        "telegram_unlinked_label": deps.localizer.t("labels.telegram_unlinked", language),
+        "link_telegram_label": deps.localizer.t("buttons.link_telegram", language),
+        "unlink_telegram_label": deps.localizer.t("buttons.unlink_telegram", language),
     }
 
 
@@ -461,8 +506,7 @@ def _paginate_actions(actions: list[Action], limit: int) -> tuple[list[Action], 
         return actions, False, limit
     if len(actions) <= limit:
         return actions, False, limit
-    next_limit = limit + DEFAULT_ACTIONS_LIMIT
-    return actions[:limit], True, next_limit
+    return actions[:limit], True, limit + DEFAULT_ACTIONS_LIMIT
 
 
 def _parse_actions_limit(raw: str | None) -> int:
@@ -480,39 +524,42 @@ def _parse_payload(payload_raw: str) -> dict[str, object]:
         data = json.loads(payload_raw)
     except json.JSONDecodeError:
         return {}
-    if isinstance(data, dict):
-        return data
-    return {}
+    return data if isinstance(data, dict) else {}
 
 
 def _persist_workflow(request: Request, result: WorkflowResult) -> None:
-    request.session[SESSION_USER_KEY] = _serialize_user(result.user)
+    _persist_authenticated_user(request, result.user.id)
     request.session[SESSION_STATE_KEY] = result.state.to_dict()
     request.session[SESSION_SCREEN_KEY] = _serialize_screen(result.screen)
 
 
-def _get_user_from_session(request: Request) -> UserProfile | None:
-    raw = request.session.get(SESSION_USER_KEY)
-    if not isinstance(raw, dict):
+async def _get_current_user(request: Request, deps: WebDependencies) -> UserAccount | None:
+    user_id = _get_user_id_from_session(request)
+    if user_id is None:
         return None
-    try:
-        return UserProfile(
-            id=int(raw["id"]),
-            external_user_id=int(raw["external_user_id"]),
-            username=_as_optional_str(raw.get("username")),
-            full_name=_as_optional_str(raw.get("full_name")),
-            language=str(raw["language"]),
-            notifications_enabled=bool(raw["notifications_enabled"]),
-        )
-    except (KeyError, ValueError, TypeError):
+    user = await deps.facade.get_user(user_id)
+    if user is None:
+        request.session.clear()
         return None
+    return user
+
+
+def _persist_authenticated_user(request: Request, user_id: int) -> None:
+    request.session[SESSION_USER_ID_KEY] = user_id
+
+
+def _get_user_id_from_session(request: Request) -> int | None:
+    raw = request.session.get(SESSION_USER_ID_KEY)
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, str) and raw.isdigit():
+        return int(raw)
+    return None
 
 
 def _get_state_from_session(request: Request) -> WorkflowState:
     raw = request.session.get(SESSION_STATE_KEY)
-    if isinstance(raw, dict):
-        return WorkflowState.from_dict(raw)
-    return WorkflowState()
+    return WorkflowState.from_dict(raw) if isinstance(raw, dict) else WorkflowState()
 
 
 def _get_screen_from_session(request: Request) -> Screen | None:
@@ -544,17 +591,6 @@ def _get_screen_from_session(request: Request) -> Screen | None:
         )
     except (ValueError, TypeError):
         return None
-
-
-def _serialize_user(user: UserProfile) -> dict[str, object]:
-    return {
-        "id": user.id,
-        "external_user_id": user.external_user_id,
-        "username": user.username,
-        "full_name": user.full_name,
-        "language": user.language,
-        "notifications_enabled": user.notifications_enabled,
-    }
 
 
 def _serialize_screen(screen: Screen) -> dict[str, object]:
@@ -595,3 +631,36 @@ def _as_optional_str(value: object) -> str | None:
     if isinstance(value, str):
         return value
     return str(value)
+
+
+def _render_landing(
+    request: Request,
+    deps: WebDependencies,
+    templates: Jinja2Templates,
+    *,
+    error: DomainError | None = None,
+    status_code: int = 200,
+) -> Response:
+    language = deps.default_language
+    context: dict[str, object] = {
+        "language": language,
+        "title": "Cashback Analyzer",
+        "subtitle": deps.localizer.t("messages.web_auth_hint", language),
+        "telegram_enabled": deps.telegram_auth_enabled,
+        "bot_username": deps.bot_username,
+        "auth_url": _telegram_callback_url(deps),
+    }
+    if error is not None:
+        context["error_message"] = deps.localizer.t(error.message_key, language, error.payload)
+    return templates.TemplateResponse(request=request, name="landing.html", context=context, status_code=status_code)
+
+
+def _telegram_callback_url(deps: WebDependencies) -> str:
+    return f"{deps.web_base_url.rstrip('/')}/auth/telegram/callback"
+
+
+def _clean_optional(value: object) -> str | None:
+    if value is None:
+        return None
+    cleaned = str(value).strip()
+    return cleaned or None

@@ -5,7 +5,7 @@
 - Python 3.11+
 - PostgreSQL 15+
 - Tesseract OCR with Russian language pack
-- Docker Desktop for containerized startup
+- Docker Desktop for compose-based startup
 
 ## Local Setup
 
@@ -16,60 +16,130 @@ pip install -r requirements.txt
 python -m app.main
 ```
 
-`app.main` delegates to [app/bootstrap/runtime.py](C:\Users\Kuznetz\Desktop\proga\cashback_bot\app\bootstrap\runtime.py), which performs:
+Application startup is driven by `app/bootstrap/runtime.py`.
 
-1. settings load
-2. logging configuration
-3. optional database auto-creation
-4. connection readiness wait
-5. Alembic migrations
-6. adapter startup
+Runtime sequence:
 
-## Environment Strategy
+1. load settings
+2. configure logging
+3. wait for database readiness
+4. run Alembic migrations when enabled
+5. assemble the DI container
+6. start enabled adapters
 
-Settings source: [app/bootstrap/config.py](C:\Users\Kuznetz\Desktop\proga\cashback_bot\app\bootstrap\config.py)
+## Main Environment Variables
 
-Environment categories:
+Settings source: `app/bootstrap/config.py`
 
-- Telegram: `BOT_TOKEN`, `TELEGRAM_BOT_USERNAME`
-- Postgres: `POSTGRES_*`, optional `DATABASE_URL`
-- OCR: `TESSERACT_PATH`, `OCR_TIMEOUT`, `MAX_FILE_SIZE`
-- Runtime: `APP_TIMEZONE`, `LOG_LEVEL`, `TEMP_DIR`
-- Web: `APP_ENABLE_WEB`, `WEB_HOST`, `WEB_PORT`, `WEB_BASE_URL`, `WEB_SESSION_SECRET`
-- Bootstrap: `AUTO_CREATE_DB`, `AUTO_MIGRATE`, retry and pool settings
+### Runtime
+
+- `LOG_LEVEL`
+- `APP_TIMEZONE`
+- `APP_ENABLE_WEB`
+- `APP_ENABLE_TELEGRAM`
+- `AUTO_CREATE_DB`
+- `AUTO_MIGRATE`
+
+### Database
+
+- `DATABASE_URL`
+- `POSTGRES_HOST`
+- `POSTGRES_PORT`
+- `POSTGRES_DB`
+- `POSTGRES_USER`
+- `POSTGRES_PASSWORD`
+
+### OCR
+
+- `TESSERACT_PATH`
+- `OCR_TIMEOUT`
+- `MAX_FILE_SIZE`
+
+### Web
+
+- `WEB_HOST`
+- `WEB_PORT`
+- `WEB_BASE_URL`
+- `WEB_SESSION_SECRET`
+- `WEB_ENABLE_TELEGRAM_AUTH`
+
+### Telegram
+
+- `BOT_TOKEN`
+- `TELEGRAM_BOT_USERNAME`
+
+Operational note:
+
+- `BOT_TOKEN` is required if the Telegram bot adapter is enabled
+- `BOT_TOKEN` and `TELEGRAM_BOT_USERNAME` are also required when web Telegram linking/login is enabled
 
 ## Recommended Modes
 
-### Telegram only
+### Web-first
 
 ```env
-APP_ENABLE_TELEGRAM=true
-APP_ENABLE_WEB=false
-```
-
-### Web only
-
-```env
+APP_ENABLE_WEB=true
 APP_ENABLE_TELEGRAM=false
-APP_ENABLE_WEB=true
+WEB_ENABLE_TELEGRAM_AUTH=true
 ```
 
-### Both
+### Telegram-only compatibility mode
 
 ```env
+APP_ENABLE_WEB=false
 APP_ENABLE_TELEGRAM=true
-APP_ENABLE_WEB=true
 ```
+
+### Full hybrid mode
+
+```env
+APP_ENABLE_WEB=true
+APP_ENABLE_TELEGRAM=true
+WEB_ENABLE_TELEGRAM_AUTH=true
+```
+
+### Local web auth only
+
+```env
+APP_ENABLE_WEB=true
+APP_ENABLE_TELEGRAM=false
+WEB_ENABLE_TELEGRAM_AUTH=false
+```
+
+## Auth Behavior
+
+### Web
+
+- local register: `POST /auth/register`
+- local login: `POST /auth/login`
+- logout: `POST /auth/logout`
+- Telegram callback/link flow: `GET /auth/telegram/callback`
+- Telegram unlink: `POST /auth/telegram/unlink`
+
+### Telegram
+
+The bot authenticates through linked external identity lookup and can still create a user on first contact.
+
+## Database Migration
+
+The identity refactor introduces:
+
+- nullable `users.telegram_user_id`
+- `users.display_name`
+- `user_identities`
+- `local_credentials`
+
+Run manually when needed:
+
+```bash
+alembic upgrade head
+```
+
+Migration notes are documented in `docs/migrations/identity-clean-break.md`.
 
 ## Docker
 
-The compose file starts:
-
-- `db`
-- `bot`
-- `web`
-
-Run:
+Start the stack with:
 
 ```bash
 docker compose up --build
@@ -77,67 +147,66 @@ docker compose up --build
 
 Design intent:
 
-- both adapter services share the same codebase and schema
-- bot and web can be deployed separately
-- database creation and migrations happen at application startup
+- both adapters share one schema and one application core
+- web and bot can be deployed independently
+- schema migrations happen at startup when enabled
 
 ## Testing
 
-Primary commands:
+Primary verification commands:
 
 ```bash
 pytest -q
-python -m compileall app
+python -m compileall app tests
 docker compose config -q
 ```
 
-The current suite covers:
+Current regression coverage includes:
 
-- category normalization
-- parser and intent recognition
-- ranking semantics
+- auth normalization and login flows
+- external identity linking and unlinking
 - repository behavior
-- runtime configuration
-- OCR adapter guard rails
-- Telegram mapping/rendering
+- OCR adapter boundaries
+- reminder routing through linked identities
+- Telegram rendering and routing
 - web adapter behavior
 - workflow interruption and recovery
 
-## Common Dev Tasks
+## Common Development Tasks
 
-### Add a new screen action
+### Add a new business use case
 
-1. Add a new `UserCommand` usage in the relevant adapter mapping if needed.
-2. Implement the behavior in `HandleCommandUseCase`.
-3. Return a `Screen` and optional `Effect`.
-4. Add tests at application level first.
-5. Add adapter-specific tests if rendering behavior changes.
+1. define or extend the application port if needed
+2. add a focused use case in `app/application/use_cases`
+3. cover it with tests first
+4. wire it in `app/bootstrap/container.py`
+5. invoke it from the workflow layer or adapter
 
-### Add a new storage-backed feature
+### Add a new transport adapter
 
-1. Extend application ports if the core needs a new dependency.
-2. Implement repository/UoW behavior in the PostgreSQL adapter.
-3. Add Alembic migration.
-4. Wire the dependency in `bootstrap/container.py`.
+1. reuse `ApplicationFacade`
+2. map inbound events to `UserCommand`
+3. keep adapter session state outside the core
+4. render `Screen` and `Action` in transport-specific UX
 
-### Add a new adapter
+### Extend identity providers
 
-1. Reuse `ApplicationFacade`.
-2. Map inbound events to `UserCommand`.
-3. Persist transport-specific workflow state outside the core.
-4. Render `Screen` according to adapter UX.
+1. add a provider constant and adapter verification logic
+2. persist provider + subject in `user_identities`
+3. route auth through `AuthenticateExternalIdentityUseCase`
+4. add adapter and integration tests
 
-## Failure Handling Expectations
+## Failure Handling
 
-- Do not swallow exceptions silently.
-- Log transport and runtime failures with enough detail for diagnosis.
-- Return localized and short user-facing messages.
-- Keep the user in a valid flow state after recoverable errors.
+- do not swallow exceptions silently
+- log operational failures with diagnosis context
+- keep user-facing errors short and localized
+- preserve valid workflow state after recoverable failures
 
 ## Deployment Notes
 
-- Use a real `BOT_TOKEN`.
-- Set a non-default `WEB_SESSION_SECRET` before enabling the web adapter.
-- Prefer secure cookies and HTTPS in production.
-- Tune DB pool settings for multi-user deployment.
-- Keep `AUTO_MIGRATE=true` only if your deployment policy allows migration at boot.
+- set a strong `WEB_SESSION_SECRET`
+- enable HTTPS and secure cookies in production
+- keep `WEB_ENABLE_TELEGRAM_AUTH=false` if Telegram linking is not needed
+- review `AUTO_MIGRATE` according to deployment policy
+- monitor reminder delivery after identity migrations

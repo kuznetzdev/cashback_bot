@@ -5,12 +5,7 @@ from app.domain.models import CashbackDraftItem
 
 async def test_store_replace_for_bank_behaviour(uow_factory) -> None:
     async with uow_factory() as uow:
-        user = await uow.users.upsert(
-            external_user_id=100,
-            username="u",
-            full_name="User",
-            default_language="ru",
-        )
+        user = await uow.users.create(display_name="User", default_language="ru")
         bank = await uow.banks.create(user.id, "Bank A")
         await uow.cashback.replace_for_bank(
             bank.id,

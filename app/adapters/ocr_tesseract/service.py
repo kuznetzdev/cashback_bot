@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from io import BytesIO
 from pathlib import Path
 from uuid import uuid4
 
@@ -9,6 +10,7 @@ import pytesseract
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps, UnidentifiedImageError
 
 from app.application.contracts.ports import OCRPort
+from app.application.dto.media import ImageUpload
 from app.domain.errors import ValidationError
 
 logger = logging.getLogger(__name__)
@@ -21,11 +23,10 @@ class TesseractOCRAdapter(OCRPort):
         self.temp_dir = temp_dir
         pytesseract.pytesseract.tesseract_cmd = tesseract_path
 
-    async def extract_text(self, image_path: Path) -> str:
-        if not image_path.exists():
+    async def extract_text(self, upload: ImageUpload) -> str:
+        if not upload.content:
             raise ValidationError("errors.broken_image")
-        file_size = image_path.stat().st_size
-        if file_size > self.max_file_size:
+        if len(upload.content) > self.max_file_size:
             raise ValidationError("errors.file_too_large")
 
         self.temp_dir.mkdir(parents=True, exist_ok=True)
@@ -33,7 +34,7 @@ class TesseractOCRAdapter(OCRPort):
         loop = asyncio.get_running_loop()
         try:
             await asyncio.wait_for(
-                loop.run_in_executor(None, self._preprocess, image_path, processed_path),
+                loop.run_in_executor(None, self._preprocess, upload.content, processed_path),
                 timeout=self.timeout,
             )
             text = await asyncio.wait_for(
@@ -56,8 +57,8 @@ class TesseractOCRAdapter(OCRPort):
         return cleaned
 
     @staticmethod
-    def _preprocess(source_path: Path, target_path: Path) -> None:
-        with Image.open(source_path) as image:
+    def _preprocess(source_content: bytes, target_path: Path) -> None:
+        with Image.open(BytesIO(source_content)) as image:
             width, height = image.size
             resized = image.resize((max(1, width * 2), max(1, height * 2)))
             grayscale = resized.convert("L")

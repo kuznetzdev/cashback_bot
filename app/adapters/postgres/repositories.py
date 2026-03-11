@@ -5,38 +5,34 @@ from datetime import datetime
 from sqlalchemy import delete, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.models import Bank, CashbackDraftItem, UserLogEntry, UserProfile
-from app.adapters.postgres.models import BankModel, CashbackItemModel, UserLogModel, UserModel, utcnow
+from app.adapters.postgres.models import (
+    BankModel,
+    CashbackItemModel,
+    LocalCredentialsModel,
+    UserIdentityModel,
+    UserLogModel,
+    UserModel,
+    utcnow,
+)
+from app.domain.models import Bank, CashbackDraftItem, LocalCredentials, ReminderTarget, UserAccount, UserIdentity, UserLogEntry
 
 
 class PostgresUserRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def upsert(self, *, external_user_id: int, username: str | None, full_name: str | None, default_language: str) -> UserProfile:
-        user = await self._find_by_external_id(external_user_id)
-        if user is None:
-            model = UserModel(
-                telegram_user_id=external_user_id,
-                username=username,
-                full_name=full_name,
-                language=default_language,
-                notifications_enabled=True,
-            )
-            self.session.add(model)
-            await self.session.flush()
-            return self._to_domain(model)
-        user.username = username
-        user.full_name = full_name
-        user.updated_at = utcnow()
+    async def create(self, *, display_name: str, default_language: str) -> UserAccount:
+        model = UserModel(
+            display_name=display_name.strip(),
+            full_name=display_name.strip(),
+            language=default_language,
+            notifications_enabled=True,
+        )
+        self.session.add(model)
         await self.session.flush()
-        return self._to_domain(user)
+        return self._to_domain(model)
 
-    async def get_by_external_id(self, external_user_id: int) -> UserProfile | None:
-        model = await self._find_by_external_id(external_user_id)
-        return self._to_domain(model) if model else None
-
-    async def get_by_id(self, user_id: int) -> UserProfile | None:
+    async def get_by_id(self, user_id: int) -> UserAccount | None:
         result = await self.session.execute(select(UserModel).where(UserModel.id == user_id))
         model = result.scalar_one_or_none()
         return self._to_domain(model) if model else None
@@ -59,23 +55,207 @@ class PostgresUserRepository:
         await self.session.flush()
         return model.notifications_enabled
 
-    async def list_notification_enabled(self) -> list[UserProfile]:
+    async def list_notification_enabled(self) -> list[UserAccount]:
         result = await self.session.execute(select(UserModel).where(UserModel.notifications_enabled.is_(True)))
         return [self._to_domain(item) for item in result.scalars().all()]
 
-    async def _find_by_external_id(self, external_user_id: int) -> UserModel | None:
-        result = await self.session.execute(select(UserModel).where(UserModel.telegram_user_id == external_user_id))
-        return result.scalar_one_or_none()
-
     @staticmethod
-    def _to_domain(model: UserModel) -> UserProfile:
-        return UserProfile(
+    def _to_domain(model: UserModel) -> UserAccount:
+        return UserAccount(
             id=model.id,
-            external_user_id=model.telegram_user_id,
-            username=model.username,
-            full_name=model.full_name,
+            display_name=model.display_name,
             language=model.language,
             notifications_enabled=model.notifications_enabled,
+        )
+
+
+class PostgresUserIdentityRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def get_by_provider_identity(self, *, provider: str, provider_user_id: str) -> UserIdentity | None:
+        result = await self.session.execute(
+            select(UserIdentityModel).where(
+                UserIdentityModel.provider == provider,
+                UserIdentityModel.provider_user_id == provider_user_id,
+            )
+        )
+        model = result.scalar_one_or_none()
+        return self._to_domain(model) if model else None
+
+    async def list_for_user(self, user_id: int) -> list[UserIdentity]:
+        result = await self.session.execute(
+            select(UserIdentityModel)
+            .where(UserIdentityModel.user_id == user_id)
+            .order_by(UserIdentityModel.provider.asc())
+        )
+        return [self._to_domain(item) for item in result.scalars().all()]
+
+    async def count_for_user(self, user_id: int) -> int:
+        result = await self.session.execute(
+            select(func.count(UserIdentityModel.id)).where(UserIdentityModel.user_id == user_id)
+        )
+        return int(result.scalar_one())
+
+    async def upsert_for_user(
+        self,
+        *,
+        user_id: int,
+        provider: str,
+        provider_user_id: str,
+        provider_username: str | None,
+        provider_display_name: str | None,
+    ) -> UserIdentity:
+        result = await self.session.execute(
+            select(UserIdentityModel).where(
+                UserIdentityModel.user_id == user_id,
+                UserIdentityModel.provider == provider,
+            )
+        )
+        model = result.scalar_one_or_none()
+        if model is None:
+            model = UserIdentityModel(
+                user_id=user_id,
+                provider=provider,
+                provider_user_id=provider_user_id,
+                provider_username=provider_username,
+                provider_display_name=provider_display_name,
+            )
+            self.session.add(model)
+        else:
+            model.provider_user_id = provider_user_id
+            model.provider_username = provider_username
+            model.provider_display_name = provider_display_name
+            model.updated_at = utcnow()
+
+        if provider == "telegram":
+            user_result = await self.session.execute(select(UserModel).where(UserModel.id == user_id))
+            user_model = user_result.scalar_one_or_none()
+            if user_model is not None:
+                try:
+                    user_model.telegram_user_id = int(provider_user_id)
+                except ValueError:
+                    user_model.telegram_user_id = None
+                user_model.username = provider_username
+                user_model.full_name = provider_display_name
+                user_model.updated_at = utcnow()
+
+        await self.session.flush()
+        return self._to_domain(model)
+
+    async def remove_for_user(self, *, user_id: int, provider: str) -> bool:
+        result = await self.session.execute(
+            select(UserIdentityModel).where(
+                UserIdentityModel.user_id == user_id,
+                UserIdentityModel.provider == provider,
+            )
+        )
+        model = result.scalar_one_or_none()
+        if model is None:
+            return False
+        if provider == "telegram":
+            user_result = await self.session.execute(select(UserModel).where(UserModel.id == user_id))
+            user_model = user_result.scalar_one_or_none()
+            if user_model is not None:
+                user_model.telegram_user_id = None
+                user_model.username = None
+                user_model.full_name = user_model.display_name
+                user_model.updated_at = utcnow()
+        await self.session.delete(model)
+        await self.session.flush()
+        return True
+
+    async def list_reminder_targets(self, *, provider: str) -> list[ReminderTarget]:
+        result = await self.session.execute(
+            select(UserIdentityModel, UserModel)
+            .join(UserModel, UserModel.id == UserIdentityModel.user_id)
+            .where(
+                UserIdentityModel.provider == provider,
+                UserModel.notifications_enabled.is_(True),
+            )
+            .order_by(UserIdentityModel.user_id.asc())
+        )
+        targets: list[ReminderTarget] = []
+        for identity_model, user_model in result.all():
+            targets.append(
+                ReminderTarget(
+                    user_id=user_model.id,
+                    provider=identity_model.provider,
+                    destination=identity_model.provider_user_id,
+                    language=user_model.language,
+                )
+            )
+        return targets
+
+    @staticmethod
+    def _to_domain(model: UserIdentityModel) -> UserIdentity:
+        return UserIdentity(
+            id=model.id,
+            user_id=model.user_id,
+            provider=model.provider,
+            provider_user_id=model.provider_user_id,
+            provider_username=model.provider_username,
+            provider_display_name=model.provider_display_name,
+        )
+
+
+class PostgresLocalCredentialsRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def create(
+        self,
+        *,
+        user_id: int,
+        username: str,
+        email: str | None,
+        password_hash: str,
+    ) -> LocalCredentials:
+        model = LocalCredentialsModel(
+            user_id=user_id,
+            username=username,
+            email=email,
+            password_hash=password_hash,
+        )
+        self.session.add(model)
+        await self.session.flush()
+        return self._to_domain(model)
+
+    async def get_by_username(self, username: str) -> LocalCredentials | None:
+        result = await self.session.execute(
+            select(LocalCredentialsModel).where(LocalCredentialsModel.username == username)
+        )
+        model = result.scalar_one_or_none()
+        return self._to_domain(model) if model else None
+
+    async def get_by_email(self, email: str) -> LocalCredentials | None:
+        result = await self.session.execute(
+            select(LocalCredentialsModel).where(LocalCredentialsModel.email == email)
+        )
+        model = result.scalar_one_or_none()
+        return self._to_domain(model) if model else None
+
+    async def get_by_user_id(self, user_id: int) -> LocalCredentials | None:
+        result = await self.session.execute(
+            select(LocalCredentialsModel).where(LocalCredentialsModel.user_id == user_id)
+        )
+        model = result.scalar_one_or_none()
+        return self._to_domain(model) if model else None
+
+    async def has_for_user(self, user_id: int) -> bool:
+        result = await self.session.execute(
+            select(LocalCredentialsModel.id).where(LocalCredentialsModel.user_id == user_id)
+        )
+        return result.scalar_one_or_none() is not None
+
+    @staticmethod
+    def _to_domain(model: LocalCredentialsModel) -> LocalCredentials:
+        return LocalCredentials(
+            id=model.id,
+            user_id=model.user_id,
+            username=model.username,
+            email=model.email,
+            password_hash=model.password_hash,
         )
 
 

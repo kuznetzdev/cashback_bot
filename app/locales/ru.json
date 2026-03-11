@@ -17,12 +17,11 @@
     "top": "Рейтинг\nЛучшие категории:\n{leaders}\n\nГлобальный рейтинг:\n{global_rating}",
     "top_category": "Лучший кэшбэк для {category}\nСтавка: {percent}%\nБанк(и): {banks}",
     "settings": "Настройки\nЯзык: {language}\nУведомления: {notifications}",
-    "history": "История действий\n{entries}"
-    ,
+    "history": "История действий\n{entries}",
     "interrupt_flow": "Незавершённый черновик"
   },
   "messages": {
-    "processing": "⏳ Обрабатываю...",
+    "processing": "Обрабатываю...",
     "saved_bank": "Банк сохранен.",
     "deleted_bank": "Банк удалён.",
     "deleted_category": "Удалено категорий: {count}. Затронуто банков: {banks}.",
@@ -31,9 +30,9 @@
     "no_ranking_data": "Недостаточно данных для рейтинга.",
     "reminder_monthly": "Не забудьте обновить свои кэшбэки на новый месяц!",
     "web_login_hint": "Войдите через Telegram и управляйте кэшбэк-категориями с телефона или компьютера.",
+    "web_auth_hint": "Используйте локальный аккаунт для web. Telegram можно привязать после входа.",
     "upload_hint": "Загрузите скриншот из банковского приложения. Лучше обрезать лишние области.",
-    "ocr_hint": "Подсказка: обрежьте скрин, увеличьте контраст и попробуйте ещё раз."
-    ,
+    "ocr_hint": "Подсказка: обрежьте скрин, увеличьте контраст и попробуйте ещё раз.",
     "confirm_discard_draft": "У вас есть несохранённые изменения.\nПеред переходом в {target} выберите действие.",
     "draft_discarded": "Черновик сброшен."
   },
@@ -65,11 +64,12 @@
     "send_input": "Отправить",
     "upload_photo": "Загрузить фото",
     "show_more": "Показать ещё",
-    "logout": "Выйти"
-    ,
+    "logout": "Выйти",
     "continue_editing": "Продолжить редактирование",
     "save_and_continue": "Сохранить и перейти",
-    "discard_and_continue": "Сбросить и перейти"
+    "discard_and_continue": "Сбросить и перейти",
+    "link_telegram": "Привязать Telegram",
+    "unlink_telegram": "Отвязать Telegram"
   },
   "labels": {
     "notifications_on": "включены",
@@ -91,7 +91,10 @@
     "target_settings": "настройки",
     "target_history": "историю",
     "target_cancel": "отмену сценария",
-    "target_other": "другой раздел"
+    "target_other": "другой раздел",
+    "linked_accounts": "Связанные аккаунты",
+    "telegram_linked": "Telegram привязан",
+    "telegram_unlinked": "Telegram не привязан"
   },
   "errors": {
     "invalid_bank_name": "Некорректное название банка.",
@@ -110,6 +113,17 @@
     "ocr_timeout": "Превышено время распознавания изображения.",
     "invalid_auth": "Не удалось подтвердить Telegram-авторизацию.",
     "auth_expired": "Сессия авторизации истекла. Войдите снова.",
-    "unexpected": "Внутренняя ошибка. Попробуйте ещё раз."
+    "unexpected": "Внутренняя ошибка. Попробуйте ещё раз.",
+    "invalid_username": "Некорректное имя пользователя.",
+    "invalid_email": "Некорректный email.",
+    "invalid_password": "Пароль должен содержать не менее 8 символов.",
+    "invalid_display_name": "Укажите отображаемое имя.",
+    "invalid_credentials": "Неверное имя пользователя или пароль.",
+    "username_taken": "Имя пользователя уже занято.",
+    "email_taken": "Email уже занят.",
+    "identity_not_linked": "Telegram аккаунт не привязан. Сначала войдите локально.",
+    "identity_already_linked": "Этот Telegram аккаунт уже привязан к другому пользователю.",
+    "identity_not_found": "Связанная identity не найдена.",
+    "last_identity_unlink_forbidden": "Сначала добавьте локальные учетные данные, затем отвязывайте последнюю внешнюю identity."
   }
 }
