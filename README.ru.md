@@ -35,7 +35,7 @@ Cashback Analyzer — это core-first платформа для анализа
 ## Что система умеет сейчас
 
 - синхронизирует пользователей через `/start` или Telegram Login
-- собирает cashback-категории со скриншотов через OCR
+- распознаёт скриншоты банковских приложений через Claude Vision (с fallback на Tesseract)
 - принимает ручной ввод и template draft
 - нормализует категории по RU/EN синонимам
 - позволяет редактировать draft и уже сохраненные банковские данные
@@ -72,8 +72,24 @@ Cashback Analyzer — это core-first платформа для анализа
 
 - `app/domain`: чистые доменные модели, enums, ошибки, нормализация, ranking rules
 - `app/application`: workflow contracts, use cases, ports, facade
-- `app/adapters`: PostgreSQL, OCR, Telegram, web, scheduler, system clock
+- `app/adapters`: PostgreSQL, OCR (Tesseract + Claude Vision), Telegram, web, scheduler, system clock
 - `app/bootstrap`: конфигурация, wiring, startup checks, migrations, runtime
+
+### Распознавание скриншотов
+
+Скриншоты из банковских приложений сложно парсить классическим OCR: сжатый
+текст, цветные бейджи, перемешанный RU/EN. Настройка `OCR_PROVIDER` выбирает
+движок, который превращает картинку в строки `Категория: N%` для парсера:
+
+- `claude` (рекомендуется) — `app/adapters/ocr_claude_vision` отдаёт изображение
+  напрямую в Claude Vision вместе со схемой Pydantic (`messages.parse`) и
+  получает структурированный список `offers: [{category, percent}]`. Одним
+  вызовом, без ломких регулярок, даже на многостолбцовой вёрстке и шумном UI.
+- `tesseract` — `app/adapters/ocr_tesseract` локально запускает Tesseract с
+  русской и английской моделями и существующей предобработкой. Удобен, если
+  нужно работать полностью offline.
+- `auto` (по умолчанию) — Claude Vision, когда задан `ANTHROPIC_API_KEY`, иначе
+  Tesseract.
 
 Транспортно-независимая точка входа в бизнес-логику:
 
@@ -88,6 +104,7 @@ handle_command(user, workflow_state, user_command) -> WorkflowResult
 ```text
 app/
   adapters/
+    ocr_claude_vision/
     ocr_tesseract/
     postgres/
     scheduler/
@@ -143,6 +160,9 @@ docker compose up --build
 - `LANG_DEFAULT`
 - `OCR_TIMEOUT`
 - `MAX_FILE_SIZE`
+- `OCR_PROVIDER` — `auto` (по умолчанию), `claude` или `tesseract`
+- `ANTHROPIC_API_KEY` — обязателен для `claude` или `auto` с включённой LLM-моделью
+- `ANTHROPIC_MODEL` — по умолчанию `claude-opus-4-7`
 - `APP_ENABLE_TELEGRAM`
 - `APP_ENABLE_WEB`
 - `WEB_BASE_URL`

@@ -39,7 +39,7 @@ The long-term product direction is documented in [docs/PRODUCT_OVERVIEW.md](C:\U
 ## What The System Does
 
 - Syncs Telegram users on `/start` or Telegram web login.
-- Collects cashback categories from screenshots via OCR.
+- Collects cashback categories from bank-app screenshots via Claude Vision (with a Tesseract fallback).
 - Accepts manual category input and template-based draft creation.
 - Normalizes categories across RU/EN synonyms.
 - Lets the user edit draft and saved bank data.
@@ -75,8 +75,26 @@ The project follows a hexagonal/core-first split:
 
 - `app/domain`: pure domain models, enums, errors, normalization, parsing helpers, ranking rules.
 - `app/application`: workflow contracts, use cases, ports, application facade.
-- `app/adapters`: PostgreSQL, OCR, Telegram, web, scheduler, system clock.
+- `app/adapters`: PostgreSQL, OCR (Tesseract + Claude Vision), Telegram, web, scheduler, system clock.
 - `app/bootstrap`: configuration, dependency wiring, startup checks, migrations, runtime.
+
+### Screenshot Recognition
+
+Bank-app screenshots are notoriously hard for classic OCR — compressed text,
+colored badges, mixed Russian/English labels. The `OCR_PROVIDER` setting picks
+the engine used to turn an uploaded image into `Category: N%` lines for the
+parser:
+
+- `claude` (recommended) — `app/adapters/ocr_claude_vision` sends the image
+  directly to Claude Vision with a constrained Pydantic schema
+  (`messages.parse`), getting back a structured `offers: [{category, percent}]`
+  list. No per-line regex; Claude handles layout variance, multi-column offers,
+  and noisy UI chrome in one pass.
+- `tesseract` — `app/adapters/ocr_tesseract` runs local Tesseract with Russian +
+  English models and the existing pre-processing pipeline. Useful when running
+  fully offline.
+- `auto` (default) — Claude Vision when `ANTHROPIC_API_KEY` is set, otherwise
+  Tesseract. Lets the same image be fed through whichever backend is available.
 
 The business entrypoint is transport-agnostic:
 
@@ -93,6 +111,7 @@ Detailed architectural behavior is described in [docs/ARCHITECTURE.md](C:\Users\
 ```text
 app/
   adapters/
+    ocr_claude_vision/
     ocr_tesseract/
     postgres/
     scheduler/
@@ -148,6 +167,9 @@ Core variables are documented in [.env.example](C:\Users\Kuznetz\Desktop\proga\c
 - `LANG_DEFAULT`
 - `OCR_TIMEOUT`
 - `MAX_FILE_SIZE`
+- `OCR_PROVIDER` — `auto` (default), `claude`, or `tesseract`
+- `ANTHROPIC_API_KEY` — required for `claude` or `auto` with LLM vision
+- `ANTHROPIC_MODEL` — defaults to `claude-opus-4-7`
 - `APP_ENABLE_TELEGRAM`
 - `APP_ENABLE_WEB`
 - `WEB_BASE_URL`
