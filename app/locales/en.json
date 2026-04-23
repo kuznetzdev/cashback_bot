@@ -137,7 +137,9 @@
     "banks": "My banks",
     "top": "Top category ranking",
     "settings": "Settings",
-    "help": "Help"
+    "help": "Help",
+    "home": "Main menu",
+    "cancel": "Cancel the current flow"
   },
   "inline": {
     "open_bot": "Open the bot to configure your banks",

@@ -136,6 +136,14 @@ class OpenAIVisionOCRAdapter(OCRPort):
         self._max_file_size = max_file_size
         self._max_tokens = max_tokens
 
+    async def close(self) -> None:
+        """Release the underlying httpx connection pool. Safe to call twice;
+        the OpenAI client handles repeated close() gracefully."""
+        try:
+            await self._client.close()
+        except Exception as error:  # pragma: no cover - best-effort cleanup
+            logger.debug("OpenAI client close raised: %s", error)
+
     async def extract_text(self, upload: ImageUpload) -> str:
         validate_image_upload(upload, max_file_size=self._max_file_size)
 

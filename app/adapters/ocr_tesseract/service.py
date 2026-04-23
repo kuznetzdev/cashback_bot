@@ -23,6 +23,24 @@ class TesseractOCRAdapter(OCRPort):
         self.max_file_size = max_file_size
         self.temp_dir = temp_dir
         pytesseract.pytesseract.tesseract_cmd = tesseract_path
+        self._sweep_temp_dir_on_startup()
+
+    def _sweep_temp_dir_on_startup(self) -> None:
+        """If a previous process crashed mid-OCR, PNG intermediates are left
+        behind. Sweep the directory at startup so the next process doesn't
+        accumulate them indefinitely — a container restart loop would fill
+        the filesystem otherwise."""
+        if not self.temp_dir.exists():
+            return
+        swept = 0
+        for png in self.temp_dir.glob("*.png"):
+            try:
+                png.unlink()
+                swept += 1
+            except OSError as error:
+                logger.debug("Could not sweep stale OCR temp file %s: %s", png, error)
+        if swept:
+            logger.info("OCR temp-dir sweep removed %s stale file(s)", swept)
 
     async def extract_text(self, upload: ImageUpload) -> str:
         validate_image_upload(upload, max_file_size=self.max_file_size)

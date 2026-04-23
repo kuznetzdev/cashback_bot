@@ -37,24 +37,37 @@ async def handle_inline_query(query: InlineQuery, deps: InlineDependencies) -> N
     """Answer a Telegram inline query with the user's best card for the query
     category. Falls back to the user's top-5 categories when the query is
     empty or doesn't match. Returns a single "open the bot" result when the
-    user has never started the bot — never silently creates accounts."""
+    user has never started the bot — never silently creates accounts.
+
+    Any facade-level error (DB outage, timeout) is swallowed and surfaced as
+    an empty inline response — Telegram shows "no results" rather than
+    hanging or exposing an exception. The error is logged for ops."""
 
     if query.from_user is None:
         await _answer(query, [], deps, cache_time=5)
         return
 
-    user = await deps.facade.find_user_by_external_identity(
-        provider="telegram",
-        provider_user_id=str(query.from_user.id),
-    )
-    if user is None:
-        await _answer(query, [_onboarding_result(deps)], deps, switch_pm=True, cache_time=5)
+    try:
+        user = await deps.facade.find_user_by_external_identity(
+            provider="telegram",
+            provider_user_id=str(query.from_user.id),
+        )
+        if user is None:
+            await _answer(query, [_onboarding_result(deps)], deps, switch_pm=True, cache_time=5)
+            return
+
+        raw_query = (query.query or "").strip()
+        snapshot = await deps.facade.ranking_snapshot(
+            user_id=user.id, query=raw_query, language=user.language
+        )
+    except Exception as error:
+        # Any downstream failure (DB unavailable, facade exception) should not
+        # surface as a hung inline query. Return empty so Telegram shows "no
+        # results" and the user can retry / message the bot directly.
+        logger.warning("Inline query failed during facade call: %s", error)
+        await _answer(query, [], deps, cache_time=5)
         return
 
-    raw_query = (query.query or "").strip()
-    snapshot = await deps.facade.ranking_snapshot(
-        user_id=user.id, query=raw_query, language=user.language
-    )
     if not snapshot.leaders:
         await _answer(query, [_empty_banks_result(user, deps)], deps, switch_pm=True, cache_time=0)
         return

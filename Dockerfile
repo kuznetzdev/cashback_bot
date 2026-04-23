@@ -12,11 +12,19 @@ RUN apt-get update \
         tesseract-ocr-rus \
         libjpeg62-turbo-dev \
         zlib1g-dev \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system --gid 10001 cashback \
+    && useradd --system --uid 10001 --gid cashback --home-dir /app --shell /usr/sbin/nologin cashback
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
+
+# Ensure runtime-writable paths (OCR temp, alembic work) belong to the service user.
+RUN mkdir -p /app/tmp /app/temp \
+    && chown -R cashback:cashback /app
+
+USER cashback
 
 CMD ["python", "-m", "app.main"]
