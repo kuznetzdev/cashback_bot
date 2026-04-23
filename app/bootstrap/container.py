@@ -5,7 +5,10 @@ from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+import logging
+
 from app.adapters.auth_local import Argon2PasswordHasher
+from app.adapters.ocr_claude_vision import ClaudeVisionOCRAdapter
 from app.adapters.ocr_tesseract import TesseractOCRAdapter
 from app.adapters.postgres.session import create_session_factory
 from app.adapters.postgres.uow import SqlAlchemyUnitOfWork, build_uow_factory
@@ -36,10 +39,16 @@ from app.application.use_cases.delete_category import DeleteCategoryUseCase
 from app.application.use_cases.get_ranking import GetRankingUseCase
 from app.application.use_cases.parse_manual_cashback import ParseManualCashbackUseCase
 from app.application.use_cases.toggle_notifications import ToggleNotificationsUseCase
+from anthropic import APIError
+
+from app.application.contracts.ports import OCRPort
 from app.bootstrap.config import Settings
+from app.domain.enums import OCRProvider
 from app.domain.services.categories import CategoryService
 from app.domain.services.parsing import ParserService
 from app.domain.services.ranking import RankingService
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -51,8 +60,61 @@ class CoreContainer:
     categories: CategoryService
     parser: ParserService
     ranking: RankingService
-    ocr: TesseractOCRAdapter
+    ocr: OCRPort
     clock: SystemClock
+
+
+def _build_tesseract(settings: Settings) -> TesseractOCRAdapter:
+    return TesseractOCRAdapter(
+        tesseract_path=settings.tesseract_path,
+        timeout=settings.ocr_timeout,
+        max_file_size=settings.max_file_size,
+        temp_dir=settings.temp_dir,
+    )
+
+
+def _build_claude_vision(settings: Settings) -> ClaudeVisionOCRAdapter:
+    return ClaudeVisionOCRAdapter(
+        api_key=settings.anthropic_api_key,
+        model=settings.anthropic_model,
+        timeout=settings.claude_vision_timeout,
+        max_file_size=settings.max_file_size,
+        max_tokens=settings.claude_vision_max_tokens,
+    )
+
+
+def _build_ocr_adapter(settings: Settings) -> OCRPort:
+    raw_provider = (settings.ocr_provider or "auto").strip().lower()
+    try:
+        provider = OCRProvider(raw_provider)
+    except ValueError as error:
+        valid = ", ".join(item.value for item in OCRProvider)
+        raise ValueError(f"Unknown OCR_PROVIDER={raw_provider!r}; expected one of: {valid}") from error
+
+    has_anthropic_key = bool(settings.anthropic_api_key.strip())
+
+    if provider is OCRProvider.TESSERACT:
+        logger.info("OCR provider: tesseract (explicit)")
+        return _build_tesseract(settings)
+
+    if provider is OCRProvider.CLAUDE:
+        if not has_anthropic_key:
+            raise ValueError("OCR_PROVIDER=claude requires ANTHROPIC_API_KEY to be set.")
+        logger.info("OCR provider: claude-vision (model=%s)", settings.anthropic_model)
+        return _build_claude_vision(settings)
+
+    # OCRProvider.AUTO — prefer Claude Vision when the key is set, else fall back to Tesseract.
+    if has_anthropic_key:
+        try:
+            adapter = _build_claude_vision(settings)
+        except (ImportError, APIError, ValueError) as error:  # pragma: no cover - defensive
+            logger.warning("Claude Vision OCR unavailable, falling back to tesseract: %s", error)
+            return _build_tesseract(settings)
+        logger.info("OCR provider: claude-vision (auto, model=%s)", settings.anthropic_model)
+        return adapter
+
+    logger.info("OCR provider: tesseract (auto, ANTHROPIC_API_KEY not set)")
+    return _build_tesseract(settings)
 
 
 def build_core_container(settings: Settings) -> CoreContainer:
@@ -67,12 +129,7 @@ def build_core_container(settings: Settings) -> CoreContainer:
     categories = CategoryService()
     parser = ParserService(categories)
     ranking = RankingService(categories)
-    ocr = TesseractOCRAdapter(
-        tesseract_path=settings.tesseract_path,
-        timeout=settings.ocr_timeout,
-        max_file_size=settings.max_file_size,
-        temp_dir=settings.temp_dir,
-    )
+    ocr = _build_ocr_adapter(settings)
     clock = SystemClock(settings.app_timezone)
     return CoreContainer(
         settings=settings,

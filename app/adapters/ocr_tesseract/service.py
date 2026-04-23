@@ -9,6 +9,7 @@ from uuid import uuid4
 import pytesseract
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps, UnidentifiedImageError
 
+from app.adapters._shared import validate_image_upload
 from app.application.contracts.ports import OCRPort
 from app.application.dto.media import ImageUpload
 from app.domain.errors import ValidationError
@@ -24,10 +25,7 @@ class TesseractOCRAdapter(OCRPort):
         pytesseract.pytesseract.tesseract_cmd = tesseract_path
 
     async def extract_text(self, upload: ImageUpload) -> str:
-        if not upload.content:
-            raise ValidationError("errors.broken_image")
-        if len(upload.content) > self.max_file_size:
-            raise ValidationError("errors.file_too_large")
+        validate_image_upload(upload, max_file_size=self.max_file_size)
 
         self.temp_dir.mkdir(parents=True, exist_ok=True)
         processed_path = self.temp_dir / f"{uuid4().hex}.png"
