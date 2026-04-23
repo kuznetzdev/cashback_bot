@@ -34,7 +34,8 @@
     "upload_hint": "Upload a screenshot from your banking app. Crop extra regions for better OCR.",
     "ocr_hint": "Hint: crop the screenshot, increase contrast, and try again.",
     "confirm_discard_draft": "You have unsaved changes.\nChoose what to do before going to {target}.",
-    "draft_discarded": "Draft was discarded."
+    "draft_discarded": "Draft was discarded.",
+    "no_ranking_data_onboarding": "No ranking data yet. Add your first bank and its cashback offers to get recommendations on where to pay."
   },
   "buttons": {
     "add_bank": "Add Bank",
@@ -126,7 +127,8 @@
     "identity_already_linked": "This Telegram account is already linked to another user.",
     "identity_not_found": "Linked identity was not found.",
     "last_identity_unlink_forbidden": "Add local credentials before unlinking the last external identity.",
-    "quickadd_usage": "Usage: /quickadd <bank>: <category> <percent>%, ...\nExample: /quickadd Tinkoff: Fuel 5%, Restaurants 3%"
+    "quickadd_usage": "Usage: /quickadd <bank>: <category> <percent>%, ...\nExample: /quickadd Tinkoff: Fuel 5%, Restaurants 3%",
+    "photo_rate_limited": "Too many photos too quickly. Please wait a moment and try again."
   },
   "commands": {
     "start": "Start the bot",

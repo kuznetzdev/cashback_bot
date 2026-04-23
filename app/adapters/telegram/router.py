@@ -19,6 +19,7 @@ from app.adapters.telegram.deep_links import (
     PAYLOAD_TOP,
 )
 from app.adapters.telegram.inline import InlineDependencies, handle_inline_query
+from app.adapters.telegram.rate_limit import TokenBucketRateLimiter
 from app.adapters.telegram.renderer import TelegramScreenRenderer
 from app.adapters.telegram.state import load_workflow_state, save_workflow_state
 from app.application import ApplicationFacade
@@ -39,6 +40,9 @@ class TelegramDependencies:
     localizer: Localizer
     default_language: str
     bot_username: str | None = None
+    # Photo uploads invoke OCR (and possibly a billed AI call); throttle them.
+    # Default: 5 photos burst, sustained at 1 photo every 10 seconds.
+    photo_rate_limiter: TokenBucketRateLimiter | None = None
 
 
 def build_router(deps: TelegramDependencies) -> Router:
@@ -82,6 +86,20 @@ def build_router(deps: TelegramDependencies) -> Router:
             await deps.renderer.notify_error(
                 message,
                 deps.localizer.t("errors.send_photo_or_text", user.language),
+                actions=[_home_action()],
+                language=user.language,
+            )
+            return
+
+        # Photo uploads trigger OCR and potentially a billed AI call. Throttle
+        # them per-user to defend against both accidental spam (user taps the
+        # attach button multiple times) and malicious burn-down attempts.
+        if deps.photo_rate_limiter is not None and not deps.photo_rate_limiter.allow(user.id):
+            await deps.renderer.notify_error(
+                message,
+                deps.localizer.t("errors.photo_rate_limited", user.language),
+                actions=[_home_action()],
+                language=user.language,
             )
             return
 

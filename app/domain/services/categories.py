@@ -1,10 +1,20 @@
 from __future__ import annotations
 
+import hashlib
 import re
 
 from rapidfuzz import process
 
 from app.domain.models import NormalizedCategory
+
+
+# Telegram callback_data is capped at 64 bytes. Our callback keys have prefixes
+# up to ~20 bytes ("nav:top_category:"), so the slug portion must stay under
+# ~40 bytes to keep inline keyboards working. Slugs produced from known
+# categories are short ASCII, but user-uploaded OCR can yield arbitrarily long
+# Russian phrases — those MUST be hash-suffixed rather than silently truncated,
+# otherwise distinct categories would collide into the same bucket.
+_MAX_SLUG_BYTES = 40
 
 
 class CategoryService:
@@ -323,7 +333,17 @@ class CategoryService:
     def _slugify(self, value: str) -> str:
         normalized = self._normalize_text(value)
         cleaned = re.sub(r"[^\w\s-]", "", normalized)
-        return re.sub(r"[\s-]+", "_", cleaned).strip("_") or "other"
+        base = re.sub(r"[\s-]+", "_", cleaned).strip("_") or "other"
+        encoded = base.encode("utf-8")
+        if len(encoded) <= _MAX_SLUG_BYTES:
+            return base
+        suffix = hashlib.sha1(encoded, usedforsecurity=False).hexdigest()[:8]
+        # Reserve 9 bytes for the "_<hex8>" stable suffix so the total stays
+        # under the limit; decode with errors="ignore" in case the byte cut
+        # lands mid-UTF-8 sequence.
+        head_bytes = encoded[: _MAX_SLUG_BYTES - 9]
+        head = head_bytes.decode("utf-8", errors="ignore").rstrip("_")
+        return f"{head}_{suffix}" if head else suffix
 
     def normalize(self, raw: str) -> NormalizedCategory:
         normalized_raw = self._normalize_text(raw)

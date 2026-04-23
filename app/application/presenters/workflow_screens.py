@@ -244,11 +244,17 @@ def confirm_delete_bank_screen(aggregate: BankAggregate) -> Screen:
 
 def top_screen(leaders: list[CategoryLeader], global_rating: list[BankScore]) -> Screen:
     if not leaders:
+        # Empty-state onboarding: instead of a dead-end "no data" screen,
+        # invite the user into the add-bank flow so /top is productive even
+        # on a fresh account.
         return Screen(
             id="top",
             title_key="screens.top",
-            body_key="messages.no_ranking_data",
-            actions=[Action(command="open_home", label_key="buttons.home")],
+            body_key="messages.no_ranking_data_onboarding",
+            actions=[
+                Action(command="open_add_bank", label_key="buttons.add_bank"),
+                Action(command="open_home", label_key="buttons.home"),
+            ],
         )
     leaders_text, global_text = format_ranking(leaders, global_rating)
     actions = [Action(command="open_top_category", label_key=item.category_name, payload={"slug": item.category_slug}) for item in leaders]
