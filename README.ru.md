@@ -35,7 +35,7 @@ Cashback Analyzer — это core-first платформа для анализа
 ## Что система умеет сейчас
 
 - синхронизирует пользователей через `/start` или Telegram Login
-- распознаёт скриншоты банковских приложений через Claude Vision (с fallback на Tesseract)
+- распознаёт скриншоты банковских приложений через OpenAI-совместимый vision-LLM (с fallback на Tesseract)
 - принимает ручной ввод и template draft
 - нормализует категории по RU/EN синонимам
 - позволяет редактировать draft и уже сохраненные банковские данные
@@ -72,7 +72,7 @@ Cashback Analyzer — это core-first платформа для анализа
 
 - `app/domain`: чистые доменные модели, enums, ошибки, нормализация, ranking rules
 - `app/application`: workflow contracts, use cases, ports, facade
-- `app/adapters`: PostgreSQL, OCR (Tesseract + Claude Vision), Telegram, web, scheduler, system clock
+- `app/adapters`: PostgreSQL, OCR (Tesseract + OpenAI-совместимый vision), Telegram, web, scheduler, system clock
 - `app/bootstrap`: конфигурация, wiring, startup checks, migrations, runtime
 
 ### Распознавание скриншотов
@@ -81,15 +81,23 @@ Cashback Analyzer — это core-first платформа для анализа
 текст, цветные бейджи, перемешанный RU/EN. Настройка `OCR_PROVIDER` выбирает
 движок, который превращает картинку в строки `Категория: N%` для парсера:
 
-- `claude` (рекомендуется) — `app/adapters/ocr_claude_vision` отдаёт изображение
-  напрямую в Claude Vision вместе со схемой Pydantic (`messages.parse`) и
-  получает структурированный список `offers: [{category, percent}]`. Одним
-  вызовом, без ломких регулярок, даже на многостолбцовой вёрстке и шумном UI.
+- `openai` (рекомендуется) — `app/adapters/ocr_openai_vision` отправляет
+  изображение в Chat Completions с `response_format={"type": "json_object"}` и
+  получает объект `{offers: [{category, percent}]}`. Адаптер работает с любым
+  OpenAI-совместимым шлюзом: настоящим OpenAI, российскими прокси (ProxyAPI,
+  VSEgpt, …), self-hosted Ollama / LM Studio, Together или Groq. Меняются
+  только `OPENAI_BASE_URL`, `OPENAI_MODEL` и ключ API.
 - `tesseract` — `app/adapters/ocr_tesseract` локально запускает Tesseract с
   русской и английской моделями и существующей предобработкой. Удобен, если
   нужно работать полностью offline.
-- `auto` (по умолчанию) — Claude Vision, когда задан `ANTHROPIC_API_KEY`, иначе
+- `auto` (по умолчанию) — OpenAI vision, когда задан `OPENAI_API_KEY`, иначе
   Tesseract.
+
+Адаптер намеренно устойчив: обёртки ```json … ``` от локальных моделей,
+текстовые преамбулы перед JSON, проценты вне диапазона, дубликаты категорий,
+ошибки rate-limit / таймаута / авторизации / невалидный JSON / отсутствие
+`content_type` — всё отображается в те же ключи `errors.*`, что Tesseract, и
+UX остаётся одинаковым независимо от того, какой движок ответил.
 
 Транспортно-независимая точка входа в бизнес-логику:
 
@@ -104,7 +112,7 @@ handle_command(user, workflow_state, user_command) -> WorkflowResult
 ```text
 app/
   adapters/
-    ocr_claude_vision/
+    ocr_openai_vision/
     ocr_tesseract/
     postgres/
     scheduler/
@@ -160,9 +168,10 @@ docker compose up --build
 - `LANG_DEFAULT`
 - `OCR_TIMEOUT`
 - `MAX_FILE_SIZE`
-- `OCR_PROVIDER` — `auto` (по умолчанию), `claude` или `tesseract`
-- `ANTHROPIC_API_KEY` — обязателен для `claude` или `auto` с включённой LLM-моделью
-- `ANTHROPIC_MODEL` — по умолчанию `claude-opus-4-7`
+- `OCR_PROVIDER` — `auto` (по умолчанию), `openai` или `tesseract`
+- `OPENAI_API_KEY` — обязателен для `openai` или `auto` с включённой LLM-моделью
+- `OPENAI_BASE_URL` — переопределяет endpoint (ProxyAPI, VSEgpt, Ollama, LM Studio, Together, Groq). Пусто = настоящий OpenAI.
+- `OPENAI_MODEL` — по умолчанию `gpt-4o`
 - `APP_ENABLE_TELEGRAM`
 - `APP_ENABLE_WEB`
 - `WEB_BASE_URL`

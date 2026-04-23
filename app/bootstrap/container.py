@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 import logging
 
 from app.adapters.auth_local import Argon2PasswordHasher
-from app.adapters.ocr_claude_vision import ClaudeVisionOCRAdapter
+from app.adapters.ocr_openai_vision import OpenAIVisionOCRAdapter
 from app.adapters.ocr_tesseract import TesseractOCRAdapter
 from app.adapters.postgres.session import create_session_factory
 from app.adapters.postgres.uow import SqlAlchemyUnitOfWork, build_uow_factory
@@ -39,7 +39,7 @@ from app.application.use_cases.delete_category import DeleteCategoryUseCase
 from app.application.use_cases.get_ranking import GetRankingUseCase
 from app.application.use_cases.parse_manual_cashback import ParseManualCashbackUseCase
 from app.application.use_cases.toggle_notifications import ToggleNotificationsUseCase
-from anthropic import APIError
+from openai import APIError
 
 from app.application.contracts.ports import OCRPort
 from app.bootstrap.config import Settings
@@ -73,13 +73,14 @@ def _build_tesseract(settings: Settings) -> TesseractOCRAdapter:
     )
 
 
-def _build_claude_vision(settings: Settings) -> ClaudeVisionOCRAdapter:
-    return ClaudeVisionOCRAdapter(
-        api_key=settings.anthropic_api_key,
-        model=settings.anthropic_model,
-        timeout=settings.claude_vision_timeout,
+def _build_openai_vision(settings: Settings) -> OpenAIVisionOCRAdapter:
+    return OpenAIVisionOCRAdapter(
+        api_key=settings.openai_api_key,
+        model=settings.openai_model,
+        base_url=settings.openai_base_url or None,
+        timeout=settings.openai_vision_timeout,
         max_file_size=settings.max_file_size,
-        max_tokens=settings.claude_vision_max_tokens,
+        max_tokens=settings.openai_vision_max_tokens,
     )
 
 
@@ -91,29 +92,37 @@ def _build_ocr_adapter(settings: Settings) -> OCRPort:
         valid = ", ".join(item.value for item in OCRProvider)
         raise ValueError(f"Unknown OCR_PROVIDER={raw_provider!r}; expected one of: {valid}") from error
 
-    has_anthropic_key = bool(settings.anthropic_api_key.strip())
+    has_openai_key = bool(settings.openai_api_key.strip())
 
     if provider is OCRProvider.TESSERACT:
         logger.info("OCR provider: tesseract (explicit)")
         return _build_tesseract(settings)
 
-    if provider is OCRProvider.CLAUDE:
-        if not has_anthropic_key:
-            raise ValueError("OCR_PROVIDER=claude requires ANTHROPIC_API_KEY to be set.")
-        logger.info("OCR provider: claude-vision (model=%s)", settings.anthropic_model)
-        return _build_claude_vision(settings)
+    if provider is OCRProvider.OPENAI:
+        if not has_openai_key:
+            raise ValueError("OCR_PROVIDER=openai requires OPENAI_API_KEY to be set.")
+        logger.info(
+            "OCR provider: openai-vision (model=%s, base_url=%s)",
+            settings.openai_model,
+            settings.openai_base_url or "default",
+        )
+        return _build_openai_vision(settings)
 
-    # OCRProvider.AUTO — prefer Claude Vision when the key is set, else fall back to Tesseract.
-    if has_anthropic_key:
+    # OCRProvider.AUTO — prefer OpenAI vision when the key is set, else fall back to Tesseract.
+    if has_openai_key:
         try:
-            adapter = _build_claude_vision(settings)
+            adapter = _build_openai_vision(settings)
         except (ImportError, APIError, ValueError) as error:  # pragma: no cover - defensive
-            logger.warning("Claude Vision OCR unavailable, falling back to tesseract: %s", error)
+            logger.warning("OpenAI vision OCR unavailable, falling back to tesseract: %s", error)
             return _build_tesseract(settings)
-        logger.info("OCR provider: claude-vision (auto, model=%s)", settings.anthropic_model)
+        logger.info(
+            "OCR provider: openai-vision (auto, model=%s, base_url=%s)",
+            settings.openai_model,
+            settings.openai_base_url or "default",
+        )
         return adapter
 
-    logger.info("OCR provider: tesseract (auto, ANTHROPIC_API_KEY not set)")
+    logger.info("OCR provider: tesseract (auto, OPENAI_API_KEY not set)")
     return _build_tesseract(settings)
 
 
