@@ -69,7 +69,8 @@
     "save_and_continue": "Сохранить и перейти",
     "discard_and_continue": "Сбросить и перейти",
     "link_telegram": "Привязать Telegram",
-    "unlink_telegram": "Отвязать Telegram"
+    "unlink_telegram": "Отвязать Telegram",
+    "try_again": "Попробовать ещё раз"
   },
   "labels": {
     "notifications_on": "включены",

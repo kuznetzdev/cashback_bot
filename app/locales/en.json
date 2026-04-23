@@ -69,7 +69,8 @@
     "save_and_continue": "Save and continue",
     "discard_and_continue": "Discard and continue",
     "link_telegram": "Link Telegram",
-    "unlink_telegram": "Unlink Telegram"
+    "unlink_telegram": "Unlink Telegram",
+    "try_again": "Try again"
   },
   "labels": {
     "notifications_on": "enabled",

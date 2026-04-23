@@ -81,17 +81,21 @@ Cashback Analyzer — это core-first платформа для анализа
 текст, цветные бейджи, перемешанный RU/EN. Настройка `OCR_PROVIDER` выбирает
 движок, который превращает картинку в строки `Категория: N%` для парсера:
 
-- `openai` (рекомендуется) — `app/adapters/ocr_openai_vision` отправляет
-  изображение в Chat Completions с `response_format={"type": "json_object"}` и
-  получает объект `{offers: [{category, percent}]}`. Адаптер работает с любым
-  OpenAI-совместимым шлюзом: настоящим OpenAI, российскими прокси (ProxyAPI,
-  VSEgpt, …), self-hosted Ollama / LM Studio, Together или Groq. Меняются
-  только `OPENAI_BASE_URL`, `OPENAI_MODEL` и ключ API.
-- `tesseract` — `app/adapters/ocr_tesseract` локально запускает Tesseract с
-  русской и английской моделями и существующей предобработкой. Удобен, если
-  нужно работать полностью offline.
-- `auto` (по умолчанию) — OpenAI vision, когда задан `OPENAI_API_KEY`, иначе
-  Tesseract.
+- `auto` (по умолчанию, **локаль-приоритет**) — если задан `OPENAI_API_KEY`,
+  работает композитный адаптер: **сначала Tesseract** (бесплатно, локально),
+  **OpenAI vision вызывается только если Tesseract вернул пусто/таймаут** для
+  конкретного скриншота. Без ключа — чистый Tesseract. Так AI-счёт остаётся
+  небольшим, а пользователь получает второй шанс на сложных скринах.
+- `tesseract` — только `app/adapters/ocr_tesseract`. Подходит для полностью
+  offline-развёртываний или жёсткого бюджета.
+- `openai` — только `app/adapters/ocr_openai_vision` (без fallback'а). Работает
+  с любым OpenAI-совместимым шлюзом: настоящим OpenAI, российскими прокси
+  (ProxyAPI, VSEgpt, …), self-hosted Ollama / LM Studio, Together или Groq.
+  Меняются только `OPENAI_BASE_URL`, `OPENAI_MODEL` и ключ API.
+
+**Правила эскалации для `auto`:** `errors.ocr_empty` и `errors.ocr_timeout`
+запускают AI-fallback; `errors.broken_image` / `errors.file_too_large` нет —
+оба движка одинаково упадут, и платить за второй вызов смысла нет.
 
 Адаптер намеренно устойчив: обёртки ```json … ``` от локальных моделей,
 текстовые преамбулы перед JSON, проценты вне диапазона, дубликаты категорий,

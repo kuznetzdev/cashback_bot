@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from app.adapters.ocr_composite import CompositeOCRAdapter
 from app.adapters.ocr_openai_vision import OpenAIVisionOCRAdapter
 from app.adapters.ocr_tesseract import TesseractOCRAdapter
 from app.bootstrap.config import Settings
@@ -20,9 +21,12 @@ def test_auto_without_key_picks_tesseract() -> None:
     assert isinstance(adapter, TesseractOCRAdapter)
 
 
-def test_auto_with_key_picks_openai_vision() -> None:
+def test_auto_with_key_picks_composite_tesseract_first_openai_fallback() -> None:
     adapter = _build_ocr_adapter(_settings(OCR_PROVIDER="auto", OPENAI_API_KEY="sk-test-123"))
-    assert isinstance(adapter, OpenAIVisionOCRAdapter)
+    # Local-first: primary is Tesseract (free), fallback is OpenAI (billed).
+    assert isinstance(adapter, CompositeOCRAdapter)
+    assert isinstance(adapter._primary, TesseractOCRAdapter)
+    assert isinstance(adapter._fallback, OpenAIVisionOCRAdapter)
 
 
 def test_explicit_tesseract_ignores_key() -> None:
