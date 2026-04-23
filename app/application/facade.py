@@ -11,12 +11,17 @@ from app.application.auth.use_cases import (
     UnlinkExternalIdentityUseCase,
 )
 from app.application.models import UserContext
+from app.application.use_cases.best_card_for_category import BestCardForCategoryUseCase, BestCardResult
+from app.application.use_cases.find_user_by_identity import FindUserByExternalIdentityUseCase
+from app.application.use_cases.get_ranking import GetRankingUseCase
 from app.application.use_cases.handle_command import HandleCommandUseCase
 from app.application.use_cases.log_event import LogEventUseCase
+from app.application.use_cases.quick_add_bank import QuickAddBankUseCase, QuickAddResult
+from app.application.use_cases.ranking_snapshot import RankingSnapshot, RankingSnapshotUseCase
 from app.application.use_cases.send_monthly_reminders import SendMonthlyRemindersUseCase
 from app.application.use_cases.sync_user import SyncTelegramUserUseCase
 from app.application.workflow.models import UserCommand, WorkflowResult, WorkflowState
-from app.domain.models import UserAccount, UserIdentity
+from app.domain.models import CategoryLeader, UserAccount, UserIdentity
 
 
 class ApplicationFacade:
@@ -33,6 +38,11 @@ class ApplicationFacade:
         handle_command_use_case: HandleCommandUseCase,
         reminders_use_case: SendMonthlyRemindersUseCase,
         log_event_use_case: LogEventUseCase,
+        find_user_by_identity_use_case: FindUserByExternalIdentityUseCase,
+        best_card_for_category_use_case: BestCardForCategoryUseCase,
+        quick_add_bank_use_case: QuickAddBankUseCase,
+        get_ranking_use_case: GetRankingUseCase,
+        ranking_snapshot_use_case: RankingSnapshotUseCase,
     ) -> None:
         self.register_local_user_use_case = register_local_user_use_case
         self.authenticate_local_user_use_case = authenticate_local_user_use_case
@@ -45,6 +55,11 @@ class ApplicationFacade:
         self.handle_command_use_case = handle_command_use_case
         self.reminders_use_case = reminders_use_case
         self.log_event_use_case = log_event_use_case
+        self.find_user_by_identity_use_case = find_user_by_identity_use_case
+        self.best_card_for_category_use_case = best_card_for_category_use_case
+        self.quick_add_bank_use_case = quick_add_bank_use_case
+        self.get_ranking_use_case = get_ranking_use_case
+        self.ranking_snapshot_use_case = ranking_snapshot_use_case
 
     async def register_local_user(self, command: LocalRegistrationCommand) -> UserAccount:
         return await self.register_local_user_use_case.execute(command)
@@ -88,3 +103,38 @@ class ApplicationFacade:
 
     async def log_event(self, *, user_id: int, action: str, payload: dict[str, object] | None = None) -> None:
         await self.log_event_use_case.execute(user_id=user_id, action=action, payload=payload)
+
+    async def find_user_by_external_identity(
+        self,
+        *,
+        provider: str,
+        provider_user_id: str,
+    ) -> UserAccount | None:
+        return await self.find_user_by_identity_use_case.execute(
+            provider=provider,
+            provider_user_id=provider_user_id,
+        )
+
+    async def best_card_for_category(
+        self,
+        *,
+        user_id: int,
+        query: str,
+        language: str,
+    ) -> BestCardResult:
+        return await self.best_card_for_category_use_case.execute(
+            user_id=user_id,
+            query=query,
+            language=language,
+        )
+
+    async def quick_add_bank(self, *, user_id: int, payload: str) -> QuickAddResult:
+        return await self.quick_add_bank_use_case.execute(user_id=user_id, payload=payload)
+
+    async def list_top_categories(self, *, user_id: int, language: str) -> list[CategoryLeader]:
+        return await self.get_ranking_use_case.top_by_category(user_id=user_id, language=language)
+
+    async def ranking_snapshot(self, *, user_id: int, query: str, language: str) -> RankingSnapshot:
+        return await self.ranking_snapshot_use_case.execute(
+            user_id=user_id, query=query, language=language
+        )

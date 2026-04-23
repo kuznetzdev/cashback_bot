@@ -3,8 +3,9 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from app.application.contracts.ports import UnitOfWorkPort
+from app.application.use_cases._ranking_shared import fetch_user_ranking_entries
 from app.domain.models import BankScore, CategoryLeader
-from app.domain.services.ranking import RankingEntry, RankingService
+from app.domain.services.ranking import RankingService
 
 
 class GetRankingUseCase:
@@ -13,26 +14,9 @@ class GetRankingUseCase:
         self.ranking = ranking
 
     async def top_by_category(self, user_id: int, language: str) -> list[CategoryLeader]:
-        entries = await self._entries_for_user(user_id)
+        entries = await fetch_user_ranking_entries(self.uow_factory, user_id)
         return self.ranking.top_by_category(entries, language)
 
     async def top_global(self, user_id: int, language: str) -> list[BankScore]:
-        entries = await self._entries_for_user(user_id)
+        entries = await fetch_user_ranking_entries(self.uow_factory, user_id)
         return self.ranking.top_global(entries, language)
-
-    async def _entries_for_user(self, user_id: int) -> list[RankingEntry]:
-        entries: list[RankingEntry] = []
-        async with self.uow_factory() as uow:
-            banks = await uow.banks.list_for_user(user_id)
-            for bank in banks:
-                items = await uow.cashback.list_for_bank(bank.id)
-                for item in items:
-                    entries.append(
-                        RankingEntry(
-                            bank_id=bank.id,
-                            bank_name=bank.bank_name,
-                            category_slug=item.normalized_category,
-                            percent=item.percent,
-                        )
-                    )
-        return entries

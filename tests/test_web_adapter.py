@@ -23,8 +23,14 @@ from app.application.auth.use_cases import (
     RegisterLocalUserUseCase,
     UnlinkExternalIdentityUseCase,
 )
+from app.application.use_cases.best_card_for_category import BestCardForCategoryUseCase
+from app.application.use_cases.find_user_by_identity import FindUserByExternalIdentityUseCase
+from app.application.use_cases.get_ranking import GetRankingUseCase
 from app.application.use_cases.handle_command import HandleCommandUseCase
+from app.application.use_cases.ranking_snapshot import RankingSnapshotUseCase
 from app.application.use_cases.log_event import LogEventUseCase
+from app.application.use_cases.quick_add_bank import QuickAddBankUseCase
+from app.application.use_cases.save_bank_draft import SaveBankDraftUseCase
 from app.application.use_cases.send_monthly_reminders import SendMonthlyRemindersUseCase
 from app.application.use_cases.sync_user import SyncTelegramUserUseCase
 from app.domain.services.categories import CategoryService
@@ -61,6 +67,11 @@ def _build_facade(uow_factory, dummy_ocr) -> ApplicationFacade:
             reminder_hour=10,
         ),
         LogEventUseCase(uow_factory),
+        FindUserByExternalIdentityUseCase(uow_factory),
+        BestCardForCategoryUseCase(uow_factory, ranking, categories),
+        QuickAddBankUseCase(parser, SaveBankDraftUseCase(uow_factory)),
+        GetRankingUseCase(uow_factory, ranking),
+        RankingSnapshotUseCase(uow_factory, ranking, categories),
     )
 
 

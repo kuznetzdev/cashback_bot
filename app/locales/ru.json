@@ -124,6 +124,32 @@
     "identity_not_linked": "Telegram аккаунт не привязан. Сначала войдите локально.",
     "identity_already_linked": "Этот Telegram аккаунт уже привязан к другому пользователю.",
     "identity_not_found": "Связанная identity не найдена.",
-    "last_identity_unlink_forbidden": "Сначала добавьте локальные учетные данные, затем отвязывайте последнюю внешнюю identity."
+    "last_identity_unlink_forbidden": "Сначала добавьте локальные учетные данные, затем отвязывайте последнюю внешнюю identity.",
+    "quickadd_usage": "Формат: /quickadd <банк>: <категория> <процент>%, ...\nПример: /quickadd Tinkoff: АЗС 5%, Рестораны 3%"
+  },
+  "commands": {
+    "start": "Запустить бота",
+    "best": "Лучшая карта для категории",
+    "quickadd": "Быстро добавить банк",
+    "banks": "Мои банки",
+    "top": "Рейтинг лучших категорий",
+    "settings": "Настройки",
+    "help": "Помощь"
+  },
+  "inline": {
+    "open_bot": "Открыть бота, чтобы настроить банки",
+    "result_title": "{category} — {percent}%",
+    "result_description": "Лучшие карты: {banks}",
+    "share_message": "💳 Лучший кэшбэк для «{category}»: {percent}% в {banks}.",
+    "no_match_title": "«{query}» — нет совпадений",
+    "no_match_description": "Попробуйте другое название категории или добавьте банк.",
+    "no_match_body": "Для категории «{query}» в ваших банках нет активных кэшбэков.",
+    "onboarding_title": "Откройте бота, чтобы добавить свои карты",
+    "onboarding_description": "Cashback Analyzer поможет выбрать лучшую карту для покупки.",
+    "onboarding_body": "Откройте диалог с ботом: {link}",
+    "empty_banks_title": "У вас ещё нет банков",
+    "empty_banks_description": "Добавьте банки в боте, чтобы получать рекомендации.",
+    "empty_banks_body": "Добавьте банки в боте: {link}",
+    "no_banks_placeholder": "—"
   }
 }
