@@ -24,12 +24,16 @@ from app.application.auth.use_cases import (
     UnlinkExternalIdentityUseCase,
 )
 from app.application.contracts.ports import ReminderSenderPort
+from app.application.use_cases.best_card_for_category import BestCardForCategoryUseCase
+from app.application.use_cases.find_user_by_identity import FindUserByExternalIdentityUseCase
 from app.application.use_cases.handle_command import HandleCommandUseCase
 from app.application.use_cases.get_bank_details import GetBankDetailsUseCase
 from app.application.use_cases.get_history import GetHistoryUseCase
 from app.application.use_cases.get_user_banks import GetUserBanksUseCase
 from app.application.use_cases.log_event import LogEventUseCase
 from app.application.use_cases.process_uploaded_image import ProcessUploadedImageUseCase
+from app.application.use_cases.quick_add_bank import QuickAddBankUseCase
+from app.application.use_cases.ranking_snapshot import RankingSnapshotUseCase
 from app.application.use_cases.send_monthly_reminders import SendMonthlyRemindersUseCase
 from app.application.use_cases.save_bank_draft import SaveBankDraftUseCase
 from app.application.use_cases.sync_user import SyncTelegramUserUseCase
@@ -175,6 +179,10 @@ def build_application_facade(core: CoreContainer, reminder_sender: ReminderSende
     change_language = ChangeLanguageUseCase(core.uow_factory)
     toggle_notifications = ToggleNotificationsUseCase(core.uow_factory)
     log_event = LogEventUseCase(core.uow_factory)
+    find_user_by_identity = FindUserByExternalIdentityUseCase(core.uow_factory)
+    best_card_for_category = BestCardForCategoryUseCase(core.uow_factory, core.ranking, core.categories)
+    quick_add_bank = QuickAddBankUseCase(core.parser, save_bank_draft)
+    ranking_snapshot = RankingSnapshotUseCase(core.uow_factory, core.ranking, core.categories)
     handle_command = HandleCommandUseCase(
         uow_factory=core.uow_factory,
         parser=core.parser,
@@ -212,4 +220,9 @@ def build_application_facade(core: CoreContainer, reminder_sender: ReminderSende
         handle_command,
         reminders,
         log_event,
+        find_user_by_identity,
+        best_card_for_category,
+        quick_add_bank,
+        get_ranking,
+        ranking_snapshot,
     )

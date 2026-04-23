@@ -24,10 +24,17 @@ async def handle_command(
         global_rating = await deps.get_ranking_use_case.top_global(user.id, user.language) if leaders else []
         return workflow_screens.result_with_screen(user=user, state=state, screen=workflow_screens.top_screen(leaders, global_rating))
     if name == "open_top_category":
-        leaders = await deps.get_ranking_use_case.top_by_category(user.id, user.language)
         slug = str(command.payload["slug"])
-        leader = next((item for item in leaders if item.category_slug == slug), None)
-        return workflow_screens.result_with_screen(user=user, state=state, screen=workflow_screens.top_category_screen(leader))
+        # Route through BestCardForCategoryUseCase so related-slug expansion
+        # (supermarkets ↔ groceries) matches the inline / slash-command path.
+        result = await deps.best_card_for_category_use_case.execute(
+            user_id=user.id, query=slug, language=user.language
+        )
+        return workflow_screens.result_with_screen(
+            user=user,
+            state=state,
+            screen=workflow_screens.top_category_screen(result.leader),
+        )
     if name == "open_settings":
         return workflow_screens.result_with_screen(user=user, state=state, screen=workflow_screens.settings_screen(user))
     if name == "set_language":

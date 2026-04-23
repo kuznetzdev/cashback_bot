@@ -9,7 +9,7 @@ from app.domain.models import NormalizedCategory
 
 class CategoryService:
     def __init__(self) -> None:
-        self._definitions = {
+        self._definitions: dict[str, dict[str, object]] = {
             "fuel": {
                 "ru": "АЗС",
                 "en": "Fuel",
@@ -17,29 +17,69 @@ class CategoryService:
                     "азс",
                     "заправка",
                     "заправки",
+                    "топливо",
+                    "бензин",
+                    "топливо и азс",
+                    "азс и топливо",
                     "fuel",
                     "fuel station",
                     "gas",
                     "gas station",
+                    "petrol",
                 ],
                 "related": [],
             },
             "restaurants": {
                 "ru": "Рестораны",
                 "en": "Restaurants",
-                "synonyms": ["ресторан", "рестораны", "кафе", "food", "dining", "restaurant", "restaurants"],
+                "synonyms": [
+                    "ресторан",
+                    "рестораны",
+                    "кафе",
+                    "кафе и рестораны",
+                    "кафе, бары и рестораны",
+                    "кафе бары и рестораны",
+                    "бары",
+                    "рестораны и доставка еды",
+                    "ресторан и доставка еды",
+                    "food",
+                    "dining",
+                    "restaurant",
+                    "restaurants",
+                    "cafe",
+                ],
+                "related": [],
+            },
+            "fast_food": {
+                "ru": "Фастфуд",
+                "en": "Fast food",
+                "synonyms": ["фастфуд", "быстрое питание", "fast food", "fastfood", "burger"],
                 "related": [],
             },
             "supermarkets": {
                 "ru": "Супермаркеты",
                 "en": "Supermarkets",
-                "synonyms": ["супермаркет", "супермаркеты", "продукты", "supermarket", "supermarkets", "groceries"],
+                "synonyms": [
+                    "супермаркет",
+                    "супермаркеты",
+                    "в супермаркетах",
+                    "продукты",
+                    "supermarket",
+                    "supermarkets",
+                    "groceries",
+                ],
                 "related": ["groceries"],
             },
             "groceries": {
                 "ru": "Продукты питания",
                 "en": "Groceries",
-                "synonyms": ["продукты питания", "продуктовый магазин", "grocery", "groceries", "food store"],
+                "synonyms": [
+                    "продукты питания",
+                    "продуктовый магазин",
+                    "grocery",
+                    "groceries",
+                    "food store",
+                ],
                 "related": ["supermarkets"],
             },
             "pharmacy": {
@@ -51,19 +91,80 @@ class CategoryService:
             "movies": {
                 "ru": "Кино",
                 "en": "Movies",
-                "synonyms": ["кино", "кинотеатр", "cinema", "movie", "movies"],
+                "synonyms": ["кино", "кинотеатр", "кинотеатры", "cinema", "movie", "movies"],
                 "related": [],
             },
             "travel": {
                 "ru": "Путешествия",
                 "en": "Travel",
                 "synonyms": ["путешествия", "поездки", "билеты", "travel", "trip", "tickets"],
+                "related": ["hotels"],
+            },
+            "hotels": {
+                "ru": "Отели",
+                "en": "Hotels",
+                "synonyms": ["отель", "отели", "гостиницы", "hotel", "hotels"],
+                "related": [],
+            },
+            "railway": {
+                "ru": "Ж/Д билеты",
+                "en": "Railway tickets",
+                "synonyms": [
+                    "жд",
+                    "ж/д",
+                    "ж/д билеты",
+                    "жд билеты",
+                    "железнодорожные билеты",
+                    "поезд",
+                    "railway",
+                    "train",
+                    "train tickets",
+                ],
+                "related": [],
+            },
+            "transport": {
+                "ru": "Транспорт",
+                "en": "Transport",
+                "synonyms": [
+                    "транспорт",
+                    "такси",
+                    "каршеринг",
+                    "такси и каршеринг",
+                    "метро",
+                    "автобус",
+                    "transport",
+                    "taxi",
+                    "carsharing",
+                ],
+                "related": [],
+            },
+            "auto_services": {
+                "ru": "Автоуслуги",
+                "en": "Auto services",
+                "synonyms": [
+                    "автоуслуги",
+                    "автосервис",
+                    "автосервисы",
+                    "авто услуги",
+                    "мойка",
+                    "auto services",
+                    "car service",
+                    "car wash",
+                ],
                 "related": [],
             },
             "home_goods": {
                 "ru": "Товары для дома",
                 "en": "Home goods",
-                "synonyms": ["товары для дома", "для дома", "home goods", "home", "household"],
+                "synonyms": [
+                    "товары для дома",
+                    "для дома",
+                    "дом и ремонт",
+                    "ремонт и дом",
+                    "home goods",
+                    "home",
+                    "household",
+                ],
                 "related": ["decor", "construction"],
             },
             "decor": {
@@ -78,19 +179,146 @@ class CategoryService:
                 "synonyms": ["строительство", "ремонт", "construction", "repair"],
                 "related": ["home_goods"],
             },
+            "clothing": {
+                "ru": "Одежда и обувь",
+                "en": "Clothing",
+                "synonyms": [
+                    "одежда",
+                    "обувь",
+                    "одежда и обувь",
+                    "shoes",
+                    "clothing",
+                    "apparel",
+                ],
+                "related": [],
+            },
+            "shopping": {
+                "ru": "Шопинг",
+                "en": "Shopping",
+                "synonyms": ["шопинг", "покупки", "shopping", "retail"],
+                "related": [],
+            },
+            "entertainment": {
+                "ru": "Развлечения",
+                "en": "Entertainment",
+                "synonyms": [
+                    "развлечения",
+                    "хобби",
+                    "хобби и развлечения",
+                    "развлечения и хобби",
+                    "entertainment",
+                    "hobby",
+                    "hobbies",
+                ],
+                "related": [],
+            },
+            "theatre": {
+                "ru": "Театры и концерты",
+                "en": "Theatre & concerts",
+                "synonyms": [
+                    "театр",
+                    "театры",
+                    "концерт",
+                    "концерты",
+                    "театры и концерты",
+                    "theatre",
+                    "theater",
+                    "concerts",
+                ],
+                "related": [],
+            },
+            "books": {
+                "ru": "Книги",
+                "en": "Books",
+                "synonyms": ["книги", "книга", "book", "books", "bookstore"],
+                "related": [],
+            },
+            "sports": {
+                "ru": "Спорттовары",
+                "en": "Sports",
+                "synonyms": [
+                    "спорт",
+                    "спорттовары",
+                    "спорттовары и фитнес",
+                    "спортмастер",
+                    "sports",
+                    "sport",
+                    "fitness",
+                ],
+                "related": [],
+            },
+            "telecom": {
+                "ru": "Связь",
+                "en": "Telecom",
+                "synonyms": [
+                    "связь",
+                    "мобильная связь",
+                    "оплата связи",
+                    "интернет",
+                    "telecom",
+                    "mobile",
+                    "phone bill",
+                ],
+                "related": [],
+            },
+            "delivery": {
+                "ru": "Доставка",
+                "en": "Delivery",
+                "synonyms": [
+                    "доставка",
+                    "доставка еды",
+                    "доставка продуктов",
+                    "delivery",
+                    "food delivery",
+                ],
+                "related": [],
+            },
+            "all_purchases": {
+                "ru": "На все покупки",
+                "en": "All purchases",
+                "synonyms": [
+                    "на все покупки",
+                    "все покупки",
+                    "за все",
+                    "за всё",
+                    "1% за всё",
+                    "все",
+                    "на всё",
+                    "all purchases",
+                    "everything",
+                    "base cashback",
+                ],
+                "related": [],
+            },
         }
         self._term_to_slug: dict[str, str] = {}
         for slug, definition in self._definitions.items():
             terms = [slug, definition["ru"], definition["en"], *definition["synonyms"]]
             for term in terms:
                 self._term_to_slug[self._normalize_text(term)] = slug
+        # Disambiguation bias: generic product searches → supermarkets slug.
         self._term_to_slug["groceries"] = "supermarkets"
         self._term_to_slug["продукты"] = "supermarkets"
         self._term_to_slug["продукты питания"] = "supermarkets"
 
     @staticmethod
     def _normalize_text(value: str) -> str:
-        return re.sub(r"\s+", " ", value.strip().lower())
+        # Strip common qualifier noise that banks append ("в Городе", «в сентябре»,
+        # "с МТС Premium") so the same base category matches across providers.
+        lowered = re.sub(r"\s+", " ", value.strip().lower())
+        for qualifier in (
+            " в городе",
+            " в москве",
+            " с подпиской",
+            " при оплате",
+            " с мтс premium",
+            " со сберпрайм",
+            " с тинькофф",
+            " для клиентов",
+        ):
+            if qualifier in lowered:
+                lowered = lowered.split(qualifier, 1)[0].strip()
+        return lowered
 
     def _slugify(self, value: str) -> str:
         normalized = self._normalize_text(value)
@@ -122,4 +350,16 @@ class CategoryService:
         return {normalized.slug, *related}
 
     def template_slugs(self) -> list[str]:
-        return ["fuel", "restaurants", "supermarkets", "pharmacy", "movies", "travel", "home_goods"]
+        return [
+            "fuel",
+            "restaurants",
+            "supermarkets",
+            "pharmacy",
+            "movies",
+            "travel",
+            "home_goods",
+            "clothing",
+            "entertainment",
+            "telecom",
+            "transport",
+        ]

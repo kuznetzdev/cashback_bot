@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from app.application.use_cases.best_card_for_category import BestCardForCategoryUseCase
 from app.application.use_cases.change_language import ChangeLanguageUseCase
 from app.application.use_cases.delete_bank import DeleteBankUseCase
 from app.application.use_cases.delete_category import DeleteCategoryUseCase
@@ -51,6 +52,7 @@ class HandleCommandUseCase:
         delete_bank_use_case: DeleteBankUseCase | None = None,
         delete_category_use_case: DeleteCategoryUseCase | None = None,
         get_ranking_use_case: GetRankingUseCase | None = None,
+        best_card_for_category_use_case: BestCardForCategoryUseCase | None = None,
         get_history_use_case: GetHistoryUseCase | None = None,
         change_language_use_case: ChangeLanguageUseCase | None = None,
         toggle_notifications_use_case: ToggleNotificationsUseCase | None = None,
@@ -64,6 +66,9 @@ class HandleCommandUseCase:
         delete_bank = delete_bank_use_case or DeleteBankUseCase(uow_factory)
         delete_category = delete_category_use_case or DeleteCategoryUseCase(uow_factory, categories)
         get_ranking = get_ranking_use_case or GetRankingUseCase(uow_factory, ranking)
+        best_card_for_category = best_card_for_category_use_case or BestCardForCategoryUseCase(
+            uow_factory, ranking, categories
+        )
         get_history = get_history_use_case or GetHistoryUseCase(uow_factory)
         change_language = change_language_use_case or ChangeLanguageUseCase(uow_factory)
         toggle_notifications = toggle_notifications_use_case or ToggleNotificationsUseCase(uow_factory)
@@ -79,6 +84,7 @@ class HandleCommandUseCase:
             delete_bank_use_case=delete_bank,
             delete_category_use_case=delete_category,
             get_ranking_use_case=get_ranking,
+            best_card_for_category_use_case=best_card_for_category,
             get_history_use_case=get_history,
             change_language_use_case=change_language,
             toggle_notifications_use_case=toggle_notifications,

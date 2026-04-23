@@ -12,6 +12,8 @@ from app.domain.services.categories import CategoryService
 class ParserService:
     LINE_PATTERNS = [
         re.compile(r"^(?P<category>.+?)\s*[-:]\s*(?P<percent>\d{1,2}(?:[.,]\d{1,2})?)\s*%?$", re.IGNORECASE),
+        # "N% Category" — the layout every Russian bank app uses on its cashback page.
+        re.compile(r"^[+\-]?(?P<percent>\d{1,2}(?:[.,]\d{1,2})?)\s*%\s+(?P<category>.+?)$", re.IGNORECASE),
         re.compile(r"^(?P<category>.+?)\s+(?P<percent>\d{1,2}(?:[.,]\d{1,2})?)\s*%?$", re.IGNORECASE),
         re.compile(r"^(?P<percent>\d{1,2}(?:[.,]\d{1,2})?)\s*%?\s*(?:for|on)\s+(?P<category>.+?)$", re.IGNORECASE),
     ]

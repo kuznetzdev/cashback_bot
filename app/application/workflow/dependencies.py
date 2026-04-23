@@ -4,6 +4,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
+from app.application.use_cases.best_card_for_category import BestCardForCategoryUseCase
 from app.application.use_cases.change_language import ChangeLanguageUseCase
 from app.application.use_cases.delete_bank import DeleteBankUseCase
 from app.application.use_cases.delete_category import DeleteCategoryUseCase
@@ -35,6 +36,7 @@ class WorkflowDependencies:
     delete_bank_use_case: DeleteBankUseCase
     delete_category_use_case: DeleteCategoryUseCase
     get_ranking_use_case: GetRankingUseCase
+    best_card_for_category_use_case: BestCardForCategoryUseCase
     get_history_use_case: GetHistoryUseCase
     change_language_use_case: ChangeLanguageUseCase
     toggle_notifications_use_case: ToggleNotificationsUseCase

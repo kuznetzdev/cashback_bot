@@ -5,6 +5,7 @@ from decimal import Decimal
 
 from app.application.contracts.ports import OCRPort, UnitOfWorkPort
 from app.application.models import UserContext
+from app.application.use_cases.best_card_for_category import BestCardForCategoryUseCase
 from app.application.use_cases.change_language import ChangeLanguageUseCase
 from app.application.use_cases.delete_bank import DeleteBankUseCase
 from app.application.use_cases.delete_category import DeleteCategoryUseCase
@@ -46,6 +47,7 @@ def _build_deps(
         delete_bank_use_case=DeleteBankUseCase(uow_factory),
         delete_category_use_case=DeleteCategoryUseCase(uow_factory, categories),
         get_ranking_use_case=GetRankingUseCase(uow_factory, ranking),
+        best_card_for_category_use_case=BestCardForCategoryUseCase(uow_factory, ranking, categories),
         get_history_use_case=GetHistoryUseCase(uow_factory),
         change_language_use_case=ChangeLanguageUseCase(uow_factory),
         toggle_notifications_use_case=ToggleNotificationsUseCase(uow_factory),

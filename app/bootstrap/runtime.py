@@ -9,6 +9,7 @@ from alembic.config import Config
 from aiogram import Bot, Dispatcher
 from aiogram.exceptions import TelegramNetworkError, TelegramServerError, TelegramUnauthorizedError
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import BotCommand
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -136,11 +137,13 @@ async def _run_telegram_adapter(
         renderer=renderer,
         localizer=localizer,
         default_language=settings.lang_default,
+        bot_username=settings.telegram_bot_username or None,
     )
     dp.include_router(build_router(telegram_deps))
     reminder_loop = ReminderLoop(facade.send_monthly_reminders)
     reminder_loop.start()
     try:
+        await _publish_bot_command_menu(bot=bot, localizer=localizer, default_language=settings.lang_default)
         await _run_polling_with_retry(
             dp=dp,
             bot=bot,
@@ -150,6 +153,22 @@ async def _run_telegram_adapter(
         await reminder_loop.stop()
         await dp.storage.close()
         await bot.session.close()
+
+
+async def _publish_bot_command_menu(*, bot: Bot, localizer: Localizer, default_language: str) -> None:
+    try:
+        commands = [
+            BotCommand(command="start", description=localizer.t("commands.start", default_language)),
+            BotCommand(command="best", description=localizer.t("commands.best", default_language)),
+            BotCommand(command="quickadd", description=localizer.t("commands.quickadd", default_language)),
+            BotCommand(command="banks", description=localizer.t("commands.banks", default_language)),
+            BotCommand(command="top", description=localizer.t("commands.top", default_language)),
+            BotCommand(command="settings", description=localizer.t("commands.settings", default_language)),
+            BotCommand(command="help", description=localizer.t("commands.help", default_language)),
+        ]
+        await bot.set_my_commands(commands)
+    except Exception as error:  # pragma: no cover - non-blocking UX polish
+        logger.warning("Failed to publish bot command menu: %s", error)
 
 
 async def _wait_for_database(engine: AsyncEngine, *, max_attempts: int, retry_delay: float) -> None:

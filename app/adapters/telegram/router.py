@@ -6,11 +6,12 @@ from dataclasses import dataclass
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.filters import CommandStart
+from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineQuery, Message
 
 from app.adapters.telegram.callbacks import decode_callback
+from app.adapters.telegram.inline import InlineDependencies, handle_inline_query
 from app.adapters.telegram.renderer import TelegramScreenRenderer
 from app.adapters.telegram.state import load_workflow_state, save_workflow_state
 from app.application import ApplicationFacade
@@ -30,6 +31,7 @@ class TelegramDependencies:
     renderer: TelegramScreenRenderer
     localizer: Localizer
     default_language: str
+    bot_username: str | None = None
 
 
 def build_router(deps: TelegramDependencies) -> Router:
@@ -120,6 +122,65 @@ def build_router(deps: TelegramDependencies) -> Router:
                     await status.delete()
                 except TelegramBadRequest as error:
                     logger.debug("Failed to delete temporary status message: %s", error)
+
+    @router.message(Command("best"))
+    async def on_best_command(message: Message, state: FSMContext, command: CommandObject) -> None:
+        query = (command.args or "").strip()
+        if not query:
+            # `/best` without an argument → show the full ranking, so the user
+            # can tap any leader from the menu.
+            await _handle_event(
+                deps=deps,
+                event=message,
+                state=state,
+                command=UserCommand(name="open_top"),
+            )
+            return
+        # BestCardForCategoryUseCase inside navigation normalizes the raw query,
+        # so slash commands and free-form text follow the same path.
+        await _handle_event(
+            deps=deps,
+            event=message,
+            state=state,
+            command=UserCommand(name="open_top_category", payload={"slug": query}),
+        )
+
+    @router.message(Command("quickadd"))
+    async def on_quickadd_command(message: Message, state: FSMContext, command: CommandObject) -> None:
+        payload = (command.args or "").strip()
+        user = await _sync_user_only(deps, message)
+        if not payload:
+            await deps.renderer.notify_error(
+                message,
+                deps.localizer.t("errors.quickadd_usage", user.language),
+            )
+            return
+        try:
+            result = await deps.facade.quick_add_bank(user_id=user.id, payload=payload)
+        except DomainError as error:
+            await deps.renderer.notify_error(
+                message,
+                deps.localizer.t(error.message_key, user.language, error.payload),
+            )
+            return
+        await _handle_event(
+            deps=deps,
+            event=message,
+            state=state,
+            command=UserCommand(name="open_bank", payload={"id": result.bank_id}),
+            known_user=user,
+            reset_state=True,
+        )
+
+    @router.inline_query()
+    async def on_inline(query: InlineQuery) -> None:
+        inline_deps = InlineDependencies(
+            facade=deps.facade,
+            localizer=deps.localizer,
+            default_language=deps.default_language,
+            bot_username=deps.bot_username,
+        )
+        await handle_inline_query(query, inline_deps)
 
     @router.message(F.text)
     async def on_text(message: Message, state: FSMContext) -> None:
