@@ -85,17 +85,23 @@ colored badges, mixed Russian/English labels. The `OCR_PROVIDER` setting picks
 the engine used to turn an uploaded image into `Category: N%` lines for the
 parser:
 
-- `openai` (recommended) — `app/adapters/ocr_openai_vision` sends the image to
-  a Chat Completions endpoint with `response_format={"type": "json_object"}`
-  and receives a `{offers: [{category, percent}]}` object. The adapter works
-  against any OpenAI-compatible gateway — the real OpenAI, Russian proxies
-  (ProxyAPI, VSEgpt, …), self-hosted Ollama / LM Studio, Together or Groq.
-  Only `OPENAI_BASE_URL`, `OPENAI_MODEL`, and the API key change.
-- `tesseract` — `app/adapters/ocr_tesseract` runs local Tesseract with Russian
-  + English models and the existing preprocessing pipeline. Useful for fully
-  offline deployments.
-- `auto` (default) — OpenAI vision when `OPENAI_API_KEY` is set, otherwise
-  Tesseract. Lets the same image be fed through whichever backend is available.
+- `auto` (default, **local-first**) — when `OPENAI_API_KEY` is set, uses a
+  composite adapter: **Tesseract runs first** (free, local), **OpenAI vision
+  is only called if Tesseract returned empty/timeout** for that specific
+  screenshot. If the API key is absent, auto is plain Tesseract. This keeps
+  the AI bill small while still giving the user a second chance on the hard
+  screenshots Tesseract mangles.
+- `tesseract` — `app/adapters/ocr_tesseract` only. Useful for fully offline
+  deployments or when an AI budget is a hard constraint.
+- `openai` — `app/adapters/ocr_openai_vision` only (no Tesseract fallback).
+  The adapter works against any OpenAI-compatible gateway: the real OpenAI,
+  Russian proxies (ProxyAPI, VSEgpt, …), self-hosted Ollama / LM Studio,
+  Together or Groq. Only `OPENAI_BASE_URL`, `OPENAI_MODEL`, and the API key
+  change.
+
+**Escalation rules for `auto`:** `errors.ocr_empty` and `errors.ocr_timeout`
+trigger the AI fallback; `errors.broken_image` / `errors.file_too_large` do
+not (both engines would fail equally, no point paying for the round-trip).
 
 The adapter is defensive by design: markdown-fenced replies, model
 pre-commentary, out-of-range percentages, duplicate categories, rate-limit

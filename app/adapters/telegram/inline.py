@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from aiogram.types import InlineQuery, InlineQueryResultArticle, InputTextMessageContent
 
+from app.adapters.telegram.deep_links import PAYLOAD_INLINE, PAYLOAD_INLINE_SETUP
 from app.application import ApplicationFacade
 from app.application.use_cases.ranking_snapshot import RankingSnapshot
 from app.domain.models import CategoryLeader, UserAccount
@@ -110,7 +111,7 @@ async def _answer(
     if switch_pm:
         language = deps.default_language
         kwargs["switch_pm_text"] = deps.localizer.t("inline.open_bot", language)
-        kwargs["switch_pm_parameter"] = "inline"
+        kwargs["switch_pm_parameter"] = PAYLOAD_INLINE
     try:
         await query.answer(**kwargs)
     except Exception as error:  # pragma: no cover - best-effort logging
@@ -153,7 +154,7 @@ def _no_match_result(
 
 def _onboarding_result(deps: InlineDependencies) -> InlineQueryResultArticle:
     language = deps.default_language
-    link = _deep_link(deps.bot_username, payload="inline")
+    link = _deep_link(deps.bot_username, payload=PAYLOAD_INLINE)
     return _build_article(
         result_id=_RESULT_ID_ONBOARDING,
         title=deps.localizer.t("inline.onboarding_title", language),
@@ -167,7 +168,7 @@ def _onboarding_result(deps: InlineDependencies) -> InlineQueryResultArticle:
 
 
 def _empty_banks_result(user: UserAccount, deps: InlineDependencies) -> InlineQueryResultArticle:
-    link = _deep_link(deps.bot_username, payload="inline_setup")
+    link = _deep_link(deps.bot_username, payload=PAYLOAD_INLINE_SETUP)
     return _build_article(
         result_id=_RESULT_ID_EMPTY_BANKS,
         title=deps.localizer.t("inline.empty_banks_title", user.language),

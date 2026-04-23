@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 import logging
 
 from app.adapters.auth_local import Argon2PasswordHasher
+from app.adapters.ocr_composite import CompositeOCRAdapter
 from app.adapters.ocr_openai_vision import OpenAIVisionOCRAdapter
 from app.adapters.ocr_tesseract import TesseractOCRAdapter
 from app.adapters.postgres.session import create_session_factory
@@ -99,35 +100,39 @@ def _build_ocr_adapter(settings: Settings) -> OCRPort:
     has_openai_key = bool(settings.openai_api_key.strip())
 
     if provider is OCRProvider.TESSERACT:
-        logger.info("OCR provider: tesseract (explicit)")
+        logger.info("OCR provider: tesseract (explicit, no AI fallback)")
         return _build_tesseract(settings)
 
     if provider is OCRProvider.OPENAI:
         if not has_openai_key:
             raise ValueError("OCR_PROVIDER=openai requires OPENAI_API_KEY to be set.")
         logger.info(
-            "OCR provider: openai-vision (model=%s, base_url=%s)",
+            "OCR provider: openai-vision (explicit, model=%s, base_url=%s)",
             settings.openai_model,
             settings.openai_base_url or "default",
         )
         return _build_openai_vision(settings)
 
-    # OCRProvider.AUTO — prefer OpenAI vision when the key is set, else fall back to Tesseract.
-    if has_openai_key:
-        try:
-            adapter = _build_openai_vision(settings)
-        except (ImportError, APIError, ValueError) as error:  # pragma: no cover - defensive
-            logger.warning("OpenAI vision OCR unavailable, falling back to tesseract: %s", error)
-            return _build_tesseract(settings)
-        logger.info(
-            "OCR provider: openai-vision (auto, model=%s, base_url=%s)",
-            settings.openai_model,
-            settings.openai_base_url or "default",
-        )
-        return adapter
+    # OCRProvider.AUTO — local-first, AI only when it genuinely helps.
+    # Tesseract handles 95% of bank screenshots for free. OpenAI vision is
+    # billed per call; we only want to pay for it when the free path gave up.
+    tesseract = _build_tesseract(settings)
+    if not has_openai_key:
+        logger.info("OCR provider: tesseract (auto, no OPENAI_API_KEY — local-only)")
+        return tesseract
 
-    logger.info("OCR provider: tesseract (auto, OPENAI_API_KEY not set)")
-    return _build_tesseract(settings)
+    try:
+        vision = _build_openai_vision(settings)
+    except (ImportError, APIError, ValueError) as error:  # pragma: no cover - defensive
+        logger.warning("OpenAI vision unavailable, running tesseract-only: %s", error)
+        return tesseract
+
+    logger.info(
+        "OCR provider: composite (auto: tesseract → openai-vision on failure, model=%s, base_url=%s)",
+        settings.openai_model,
+        settings.openai_base_url or "default",
+    )
+    return CompositeOCRAdapter(primary=tesseract, fallback=vision)
 
 
 def build_core_container(settings: Settings) -> CoreContainer:
