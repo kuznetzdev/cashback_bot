@@ -39,14 +39,42 @@ The long-term product direction is documented in [docs/PRODUCT_OVERVIEW.md](C:\U
 ## What The System Does
 
 - Syncs Telegram users on `/start` or Telegram web login.
-- Collects cashback categories from bank-app screenshots via an OpenAI-compatible vision LLM (with a Tesseract fallback).
-- Accepts manual category input and template-based draft creation.
-- Normalizes categories across RU/EN synonyms.
+- Collects cashback categories from bank-app screenshots through a tiered OCR pipeline (local Tesseract first; OpenAI-compatible vision LLM as a fallback only when Tesseract returned nothing or timed out).
+- Accepts manual category input, `/quickadd <bank>: cat1 N%, cat2 M%…` one-line submissions, and template-based draft creation.
+- Normalizes 20+ categories across RU/EN synonyms and common bank qualifiers ("в Городе", "с МТС Premium", "со СберПрайм"), with fuzzy typo-resilience.
 - Lets the user edit draft and saved bank data.
+- Answers "which card for X?" from three entry points that share one use case:
+  - Telegram **inline mode** (`@cashback_bot <category>` from any chat);
+  - slash command `/best <category>`;
+  - free-form text ("где лучше рестораны").
+- Exposes the same query on the web as `GET /api/best?q=<category>` for scripting / mobile clients.
 - Builds category leaders, global bank ranking, and best-bank answers.
 - Stores action history in `user_logs`.
 - Sends monthly reminders to users with enabled notifications.
 - Runs Telegram and web adapters independently through feature flags.
+
+## Telegram Commands
+
+The bot advertises its command menu via `set_my_commands` on startup:
+
+| Command | Purpose |
+| --- | --- |
+| `/start` | Launch the bot. Supports deep-link payloads — `?start=inline_setup` jumps straight to "add bank"; `?start=add_bank` / `?start=top` / `?start=help` route analogously. |
+| `/best <category>` | Instant "best card for X" answer (routes through the same path as inline mode). Without an argument it opens the full ranking. |
+| `/quickadd Tinkoff: АЗС 5%, Рестораны 3%` | Create or replace a saved bank in one message. Separators: `,`, `;`, `\n` between items; `:` / `—` / `-` between bank name and items. |
+| `/banks` | Open the saved-banks list. |
+| `/top` | Open the ranking. Empty-state shows an "Add first bank" onboarding CTA. |
+| `/settings` | Language, notifications. |
+| `/help` | List commands and common text intents. |
+| `/home` | Return to the main menu. |
+| `/cancel` | Discard any in-progress draft and return home. |
+
+Error messages always carry an inline keyboard (Home + context-aware Retry) so
+the user is never stranded on a text-only screen.
+
+**Rate limits:** photo uploads are throttled per-user (burst of 5, refill 1
+every 10 s) to protect the OCR path from accidental spam and abuse. Manual
+text input and slash commands are unthrottled.
 
 ## Current Baseline Vs Product Vision
 

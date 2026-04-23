@@ -15,6 +15,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.adapters.scheduler import ReminderLoop
+from app.adapters.telegram.rate_limit import TokenBucketRateLimiter
 from app.adapters.telegram.reminder_sender import TelegramReminderSender
 from app.adapters.telegram.renderer import TelegramScreenRenderer
 from app.adapters.telegram.router import TelegramDependencies, build_router
@@ -138,6 +139,9 @@ async def _run_telegram_adapter(
         localizer=localizer,
         default_language=settings.lang_default,
         bot_username=settings.telegram_bot_username or None,
+        # Burst 5 photos, refill 1 every 10s. Enough for normal use (swap cards,
+        # reshoot a blurry photo) while capping abuse at ~6 photos/minute/user.
+        photo_rate_limiter=TokenBucketRateLimiter(capacity=5, refill_per_second=0.1),
     )
     dp.include_router(build_router(telegram_deps))
     reminder_loop = ReminderLoop(facade.send_monthly_reminders)

@@ -242,3 +242,61 @@ def test_authenticated_user_can_link_and_unlink_telegram(uow_factory, dummy_ocr,
     unlink = client.post("/auth/telegram/unlink", follow_redirects=False)
     assert unlink.status_code == 303
     assert all(identity.provider_user_id != "999" for identity in store.identities.values())
+
+
+def test_api_best_returns_401_for_anonymous(uow_factory, dummy_ocr, tmp_path: Path) -> None:
+    client = _build_client(uow_factory, dummy_ocr, tmp_path)
+    response = client.get("/api/best", params={"q": "азс"})
+    assert response.status_code == 401
+    assert response.json() == {"error": "unauthenticated"}
+
+
+def test_api_best_returns_snapshot_for_authenticated_user(
+    uow_factory, dummy_ocr, tmp_path: Path
+) -> None:
+    client = _build_client(uow_factory, dummy_ocr, tmp_path)
+    _register(client, username="api_user")
+
+    # Add a bank with one category so the snapshot has data to return.
+    client.post("/app/action", data={"command": "open_add_bank", "payload_json": "{}"})
+    client.post("/app/action", data={"command": "select_bank_preset", "payload_json": "{\"index\": 0}"})
+    client.post(
+        "/app/action",
+        data={"command": "choose_input_method", "payload_json": "{\"method\": \"manual\"}"},
+    )
+    client.post("/app/input", data={"text": "АЗС 5%"})
+    client.post("/app/action", data={"command": "save_bank", "payload_json": "{}"})
+
+    response = client.get("/api/best", params={"q": "азс"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["normalized_slug"] == "fuel"
+    assert body["best_match"] is not None
+    assert body["best_match"]["category_slug"] == "fuel"
+    assert body["best_match"]["best_percent"] == "5.00"
+    assert isinstance(body["leaders"], list)
+    assert len(body["leaders"]) >= 1
+
+
+def test_api_best_empty_query_returns_leaders_without_match(
+    uow_factory, dummy_ocr, tmp_path: Path
+) -> None:
+    client = _build_client(uow_factory, dummy_ocr, tmp_path)
+    _register(client, username="api_user2")
+
+    client.post("/app/action", data={"command": "open_add_bank", "payload_json": "{}"})
+    client.post("/app/action", data={"command": "select_bank_preset", "payload_json": "{\"index\": 0}"})
+    client.post(
+        "/app/action",
+        data={"command": "choose_input_method", "payload_json": "{\"method\": \"manual\"}"},
+    )
+    client.post("/app/input", data={"text": "Рестораны 7%"})
+    client.post("/app/action", data={"command": "save_bank", "payload_json": "{}"})
+
+    response = client.get("/api/best")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["query"] == ""
+    # No query → best_match intentionally null; leaders still populated.
+    assert body["best_match"] is None
+    assert any(leader["category_slug"] == "restaurants" for leader in body["leaders"])
