@@ -39,7 +39,7 @@ The long-term product direction is documented in [docs/PRODUCT_OVERVIEW.md](C:\U
 ## What The System Does
 
 - Syncs Telegram users on `/start` or Telegram web login.
-- Collects cashback categories from bank-app screenshots via Claude Vision (with a Tesseract fallback).
+- Collects cashback categories from bank-app screenshots via an OpenAI-compatible vision LLM (with a Tesseract fallback).
 - Accepts manual category input and template-based draft creation.
 - Normalizes categories across RU/EN synonyms.
 - Lets the user edit draft and saved bank data.
@@ -75,7 +75,7 @@ The project follows a hexagonal/core-first split:
 
 - `app/domain`: pure domain models, enums, errors, normalization, parsing helpers, ranking rules.
 - `app/application`: workflow contracts, use cases, ports, application facade.
-- `app/adapters`: PostgreSQL, OCR (Tesseract + Claude Vision), Telegram, web, scheduler, system clock.
+- `app/adapters`: PostgreSQL, OCR (Tesseract + OpenAI-compatible vision), Telegram, web, scheduler, system clock.
 - `app/bootstrap`: configuration, dependency wiring, startup checks, migrations, runtime.
 
 ### Screenshot Recognition
@@ -85,16 +85,23 @@ colored badges, mixed Russian/English labels. The `OCR_PROVIDER` setting picks
 the engine used to turn an uploaded image into `Category: N%` lines for the
 parser:
 
-- `claude` (recommended) — `app/adapters/ocr_claude_vision` sends the image
-  directly to Claude Vision with a constrained Pydantic schema
-  (`messages.parse`), getting back a structured `offers: [{category, percent}]`
-  list. No per-line regex; Claude handles layout variance, multi-column offers,
-  and noisy UI chrome in one pass.
-- `tesseract` — `app/adapters/ocr_tesseract` runs local Tesseract with Russian +
-  English models and the existing pre-processing pipeline. Useful when running
-  fully offline.
-- `auto` (default) — Claude Vision when `ANTHROPIC_API_KEY` is set, otherwise
+- `openai` (recommended) — `app/adapters/ocr_openai_vision` sends the image to
+  a Chat Completions endpoint with `response_format={"type": "json_object"}`
+  and receives a `{offers: [{category, percent}]}` object. The adapter works
+  against any OpenAI-compatible gateway — the real OpenAI, Russian proxies
+  (ProxyAPI, VSEgpt, …), self-hosted Ollama / LM Studio, Together or Groq.
+  Only `OPENAI_BASE_URL`, `OPENAI_MODEL`, and the API key change.
+- `tesseract` — `app/adapters/ocr_tesseract` runs local Tesseract with Russian
+  + English models and the existing preprocessing pipeline. Useful for fully
+  offline deployments.
+- `auto` (default) — OpenAI vision when `OPENAI_API_KEY` is set, otherwise
   Tesseract. Lets the same image be fed through whichever backend is available.
+
+The adapter is defensive by design: markdown-fenced replies, model
+pre-commentary, out-of-range percentages, duplicate categories, rate-limit
+errors, timeouts, auth failures, malformed JSON, and missing `content_type`
+headers are all mapped to the existing `errors.*` translation keys so the UX
+stays the same regardless of which engine answered.
 
 The business entrypoint is transport-agnostic:
 
@@ -111,7 +118,7 @@ Detailed architectural behavior is described in [docs/ARCHITECTURE.md](C:\Users\
 ```text
 app/
   adapters/
-    ocr_claude_vision/
+    ocr_openai_vision/
     ocr_tesseract/
     postgres/
     scheduler/
@@ -167,9 +174,10 @@ Core variables are documented in [.env.example](C:\Users\Kuznetz\Desktop\proga\c
 - `LANG_DEFAULT`
 - `OCR_TIMEOUT`
 - `MAX_FILE_SIZE`
-- `OCR_PROVIDER` — `auto` (default), `claude`, or `tesseract`
-- `ANTHROPIC_API_KEY` — required for `claude` or `auto` with LLM vision
-- `ANTHROPIC_MODEL` — defaults to `claude-opus-4-7`
+- `OCR_PROVIDER` — `auto` (default), `openai`, or `tesseract`
+- `OPENAI_API_KEY` — required for `openai` or `auto` with LLM vision
+- `OPENAI_BASE_URL` — override for OpenAI-compatible endpoints (ProxyAPI, VSEgpt, Ollama, LM Studio, Together, Groq). Leave empty for the real OpenAI.
+- `OPENAI_MODEL` — defaults to `gpt-4o`
 - `APP_ENABLE_TELEGRAM`
 - `APP_ENABLE_WEB`
 - `WEB_BASE_URL`

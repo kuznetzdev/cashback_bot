@@ -16,5 +16,5 @@ class SourceType(str, Enum):
 
 class OCRProvider(str, Enum):
     AUTO = "auto"
-    CLAUDE = "claude"
+    OPENAI = "openai"
     TESSERACT = "tesseract"
