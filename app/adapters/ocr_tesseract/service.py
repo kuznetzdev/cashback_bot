@@ -7,7 +7,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytesseract
-from PIL import Image, ImageEnhance, ImageFilter, ImageOps, ImageStat, UnidentifiedImageError
+from PIL import Image, ImageFilter, ImageOps, ImageStat, UnidentifiedImageError
 
 from app.adapters._shared import validate_image_upload
 from app.application.contracts.ports import OCRPort
@@ -76,7 +76,12 @@ class TesseractOCRAdapter(OCRPort):
     def _preprocess(source_content: bytes, target_path: Path) -> None:
         with Image.open(BytesIO(source_content)) as image:
             width, height = image.size
-            resized = image.resize((max(1, width * 2), max(1, height * 2)))
+            # LANCZOS keeps letter edges sharp at 2× upscale; the old default
+            # (BILINEAR) rounded serifs and made small Cyrillic % signs mushy.
+            resized = image.resize(
+                (max(1, width * 2), max(1, height * 2)),
+                resample=Image.Resampling.LANCZOS,
+            )
             grayscale = resized.convert("L")
             # Modern bank apps default to dark themes — light text on near-black
             # backgrounds. Tesseract is trained on dark-text-on-light, so we
@@ -85,14 +90,15 @@ class TesseractOCRAdapter(OCRPort):
             # (mean 140+) pass through untouched.
             grayscale = _autoinvert_if_dark(grayscale, threshold=96)
             contrasted = ImageOps.autocontrast(grayscale, cutoff=2)
-            enhanced = ImageEnhance.Contrast(contrasted).enhance(1.4)
-            sharpened = enhanced.filter(ImageFilter.SHARPEN)
-            denoised = grayscale.filter(ImageFilter.MedianFilter(size=3))
-            thresholded = denoised.point(lambda pixel: 255 if pixel > 145 else 0)
-            thresholded = ImageOps.autocontrast(thresholded)
-            thresholded = thresholded.filter(ImageFilter.MedianFilter(size=3))
-            thresholded = Image.blend(sharpened, thresholded, alpha=0.7)
-            thresholded.save(target_path, format="PNG")
+            # UnsharpMask produces a visibly crisper glyph edge than the plain
+            # SHARPEN kernel — especially for thin Cyrillic strokes at small
+            # sizes. Threshold=3 ignores the tiny noise the autocontrast step
+            # would otherwise amplify.
+            sharpened = contrasted.filter(
+                ImageFilter.UnsharpMask(radius=1.5, percent=180, threshold=3)
+            )
+            denoised = sharpened.filter(ImageFilter.MedianFilter(size=3))
+            denoised.save(target_path, format="PNG")
 
     @staticmethod
     def _ocr(processed_path: Path) -> str:

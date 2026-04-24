@@ -74,6 +74,14 @@ class ParserService:
                 return None
             if not category or percent <= 0 or percent > 100:
                 return None
+            # Reject OCR artifacts: a "category" of length 1, or one that's
+            # entirely digits / punctuation (e.g. "%", "5", ":", "- -") —
+            # these slip through the permissive .+? capture when Tesseract
+            # mangles a screenshot into "5% 3% 7%" runs.
+            if len(category) < 2:
+                return None
+            if not any(ch.isalpha() for ch in category):
+                return None
             return category, percent.quantize(Decimal("0.01"))
         return None
 
