@@ -104,6 +104,15 @@ class CashbackRepositoryPort(Protocol):
     async def replace_for_bank(self, bank_id: int, items: list[CashbackDraftItem]) -> None:
         ...
 
+    async def list_ranking_entries_for_user(self, user_id: int) -> list[RankingEntry]:
+        """Bulk read: a single JOIN over banks + cashback_items for one user.
+
+        Replaces the legacy "loop over banks, fetch items per bank" pattern
+        (O(N+1) SQL round-trips) with a single statement. Adapters that can't
+        optimise this (e.g. test in-memory) can still implement it naively.
+        """
+        ...
+
 
 class LogRepositoryPort(Protocol):
     async def add(self, user_id: int, action: str, payload: dict | None = None) -> None:

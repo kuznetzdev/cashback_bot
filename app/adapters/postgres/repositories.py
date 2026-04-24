@@ -15,6 +15,7 @@ from app.adapters.postgres.models import (
     utcnow,
 )
 from app.domain.models import Bank, CashbackDraftItem, LocalCredentials, ReminderTarget, UserAccount, UserIdentity, UserLogEntry
+from app.domain.services.ranking import RankingEntry
 
 
 class PostgresUserRepository:
@@ -56,7 +57,16 @@ class PostgresUserRepository:
         return model.notifications_enabled
 
     async def list_notification_enabled(self) -> list[UserAccount]:
-        result = await self.session.execute(select(UserModel).where(UserModel.notifications_enabled.is_(True)))
+        # Hard cap at 1000 to avoid pulling a multi-million-row table on bot
+        # growth. Monthly reminder paging beyond this is handled at the
+        # dispatch layer (scheduler slots); the point here is to never OOM
+        # the process on a single query.
+        result = await self.session.execute(
+            select(UserModel)
+            .where(UserModel.notifications_enabled.is_(True))
+            .order_by(UserModel.id.asc())
+            .limit(1000)
+        )
         return [self._to_domain(item) for item in result.scalars().all()]
 
     @staticmethod
@@ -337,6 +347,34 @@ class PostgresCashbackRepository:
                 )
             )
         await self.session.flush()
+
+    async def list_ranking_entries_for_user(self, user_id: int) -> list[RankingEntry]:
+        # Single JOIN fetches every (bank, category, percent) tuple the user
+        # owns. Replaces the N+1 pattern: one SELECT for banks, then one
+        # SELECT per bank for its items. On a user with 10 banks and 20
+        # categories each that's 1 query instead of 11, and the planner can
+        # actually choose a useful join strategy.
+        stmt = (
+            select(
+                BankModel.id,
+                BankModel.bank_name,
+                CashbackItemModel.normalized_category,
+                CashbackItemModel.percent,
+            )
+            .join(CashbackItemModel, CashbackItemModel.bank_id == BankModel.id)
+            .where(BankModel.user_id == user_id)
+            .order_by(BankModel.id.asc())
+        )
+        result = await self.session.execute(stmt)
+        return [
+            RankingEntry(
+                bank_id=int(row[0]),
+                bank_name=str(row[1]),
+                category_slug=str(row[2]),
+                percent=row[3],
+            )
+            for row in result.all()
+        ]
 
 
 class PostgresLogRepository:

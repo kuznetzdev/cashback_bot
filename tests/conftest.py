@@ -248,6 +248,26 @@ class InMemoryCashbackRepo:
     async def replace_for_bank(self, bank_id: int, items: list[CashbackDraftItem]) -> None:
         self.store.bank_items[bank_id] = list(items)
 
+    async def list_ranking_entries_for_user(self, user_id: int):
+        # Mirrors the postgres adapter's single-query semantics so tests
+        # exercise the same code path as production.
+        from app.domain.services.ranking import RankingEntry
+
+        entries = []
+        for bank in self.store.banks.values():
+            if bank.user_id != user_id:
+                continue
+            for item in self.store.bank_items.get(bank.id, []):
+                entries.append(
+                    RankingEntry(
+                        bank_id=bank.id,
+                        bank_name=bank.bank_name,
+                        category_slug=item.normalized_category,
+                        percent=item.percent,
+                    )
+                )
+        return entries
+
 
 class InMemoryLogsRepo:
     def __init__(self, store: InMemoryStore) -> None:

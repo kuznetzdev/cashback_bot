@@ -88,6 +88,8 @@ class CashbackItemModel(Base):
     __table_args__ = (
         Index("ix_cashback_items_bank_id", "bank_id"),
         Index("ix_cashback_items_normalized_category", "normalized_category"),
+        # Covering index for the ranking bulk JOIN (banks→items by user).
+        Index("ix_cashback_items_bank_category", "bank_id", "normalized_category"),
     )
 
     id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True, autoincrement=True)
@@ -102,7 +104,10 @@ class CashbackItemModel(Base):
 
 class UserLogModel(Base):
     __tablename__ = "user_logs"
-    __table_args__ = (Index("ix_user_logs_user_id_created_at", "user_id", "created_at"),)
+    __table_args__ = (
+        Index("ix_user_logs_user_id_created_at", "user_id", "created_at"),
+        Index("ix_user_logs_user_action_created", "user_id", "action", "created_at"),
+    )
 
     id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
