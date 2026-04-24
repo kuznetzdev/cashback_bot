@@ -1,111 +1,133 @@
-# Web user cases
+# Cashback Analyzer Web: User Cases
 
-Краткая фиксация пользовательских сценариев для web adapter.
+Этот документ фиксирует основные пользовательские сценарии web adapter.
+Бизнес-логика остается общей: application возвращает `Screen` и принимает `UserCommand`, а web adapter только маппит HTTP/session events и рендерит результат.
 
-Источник логики:
+## 1. Аутентификация
 
-- единое ядро `handle_command(...)`
-- web только рендерит `Screen/Action`
+### UC-WEB-001 Локальная регистрация
 
-## 1. Вход и session
+- Предусловие: пользователь не аутентифицирован.
+- Шаги: открыть `/`, заполнить форму регистрации, отправить `POST /auth/register`.
+- Результат: создается platform user, создаются local credentials, открывается session, выполняется redirect на `/app`.
 
-### UC-WEB-001 Вход через Telegram Login
+### UC-WEB-002 Локальный вход
 
-- предусловие: пользователь не авторизован
-- шаги: открыть `/` -> пройти Telegram Login widget -> callback `/auth/telegram/callback`
-- результат: пользователь синхронизирован в БД, открыт экран `home`
+- Предусловие: у пользователя уже есть local credentials.
+- Шаги: открыть `/`, заполнить форму входа, отправить `POST /auth/login`.
+- Результат: создается session, открывается `/app`.
 
-### UC-WEB-002 Протухшая или отсутствующая session
+### UC-WEB-003 Вход через Telegram callback для уже привязанной identity
 
-- шаги: открыть `/app` или отправить `/app/action` без валидной session
-- результат: redirect на `/` без падения процесса
+- Предусловие: Telegram identity уже привязана к platform user.
+- Шаги: открыть `/auth/telegram/callback` через Telegram Login widget.
+- Результат: пользователь аутентифицируется в существующий account.
 
-## 2. Добавление банка
+### UC-WEB-004 Привязка Telegram к уже аутентифицированному web user
 
-### UC-WEB-010 Добавление через manual
+- Предусловие: пользователь уже вошел локально.
+- Шаги: открыть `/app`, начать Telegram linking flow, завершить callback.
+- Результат: в `user_identities` появляется `provider=telegram` для текущего platform user, текущая web session сохраняется.
 
-- шаги: `home -> add_bank -> select_bank -> choose_input_method(manual) -> submit_manual_text -> preview -> save_bank`
-- результат: банк сохранен атомарной заменой `cashback_items`, открыт `bank_details`
+### UC-WEB-005 Отвязка Telegram
 
-### UC-WEB-011 Добавление через photo (OCR)
+- Предусловие: Telegram identity привязана.
+- Шаги: `POST /auth/telegram/unlink`.
+- Результат: Telegram identity удаляется, local auth остается доступным.
 
-- шаги: `home -> add_bank -> select_bank -> choose_input_method(photo) -> upload image -> preview -> save_bank`
-- результат: OCR + parser + нормализация выполнены, данные сохранены
+### UC-WEB-006 Неаутентифицированный доступ к приложению
 
-### UC-WEB-012 Добавление через template
+- Шаги: открыть `/app` или отправить POST в `/app/action` без валидной session.
+- Результат: redirect на `/`.
 
-- шаги: `home -> add_bank -> select_bank -> choose_input_method(template) -> preview -> edit -> save_bank`
-- результат: draft создан из шаблона, нулевые проценты запрещены к сохранению
+## 2. Создание банка
 
-## 3. Редактирование и управление
+### UC-WEB-010 Добавление банка вручную
 
-### UC-WEB-020 Редактирование draft до сохранения
+- Шаги: `home -> add_bank -> select_bank -> choose_input_method(manual) -> submit_manual_text -> preview -> save_bank`.
+- Результат: банк и cashback items сохраняются транзакционно.
 
-- шаги: на `preview` использовать `pick_item`, `edit category`, `edit percent`, `add item`, `delete item`
-- результат: изменения применяются в draft state, экран `preview` остается консистентным
+### UC-WEB-011 Добавление банка по изображению
+
+- Шаги: `home -> add_bank -> select_bank -> choose_input_method(photo) -> upload image -> preview -> save_bank`.
+- Результат: web adapter передает `ImageUpload`, OCR и parser строят draft, пользователь подтверждает и сохраняет его.
+
+### UC-WEB-012 Добавление банка из шаблона
+
+- Шаги: `home -> add_bank -> select_bank -> choose_input_method(template) -> preview/edit -> save_bank`.
+- Результат: создается draft из template items, затем редактируется и сохраняется как обычный bank draft.
+
+## 3. Редактирование
+
+### UC-WEB-020 Редактирование draft
+
+- Шаги: на preview использовать `pick_item`, edit category, edit percent, add item, delete item.
+- Результат: изменения применяются только к `WorkflowState`, пока не вызван `save_bank`.
 
 ### UC-WEB-021 Редактирование сохраненного банка
 
-- шаги: `my_banks -> bank_details -> edit_bank -> preview/edit -> save_bank`
-- результат: текущий набор категорий банка полностью пересохраняется
+- Шаги: `my_banks -> bank_details -> edit_bank -> preview/edit -> save_bank`.
+- Результат: сохраненный набор категорий банка полностью заменяется новым draft.
 
 ### UC-WEB-022 Удаление банка
 
-- шаги: `bank_details -> request_delete_bank -> confirm_delete_bank`
-- результат: банк и категории удалены каскадно, пользователь возвращен в `home`
+- Шаги: `bank_details -> request_delete_bank -> confirm_delete_bank`.
+- Результат: банк и его cashback items удаляются, пользователь возвращается на безопасный экран.
 
-## 4. Аналитика, настройки, история
+## 4. Аналитика и настройки
 
-### UC-WEB-030 Рейтинг
+### UC-WEB-030 Просмотр рейтинга
 
-- шаги: `home -> top -> top_category`
-- результат: лучший процент по категориям, глобальный рейтинг банков, корректная обработка ничьих
+- Шаги: `home -> top -> top_category`.
+- Результат: показываются лучшие cashback по категориям и глобальный рейтинг банков.
 
-### UC-WEB-031 Настройки
+### UC-WEB-031 Настройки профиля
 
-- шаги: `home -> settings -> set_language` и/или `toggle_notifications`
-- результат: настройки сохранены в БД и сразу отражены в UI
+- Шаги: `home -> settings -> set_language` и/или `toggle_notifications`.
+- Результат: настройки сохраняются на уровне platform user.
 
 ### UC-WEB-032 История действий
 
-- шаги: `home -> history`
-- результат: показ последних записей `user_logs`
+- Шаги: `home -> history`.
+- Результат: отображаются последние записи из `user_logs`.
 
-## 5. Прерывания и восстановление
+## 5. Interrupt flow
 
-### UC-WEB-040 Выход из незавершенного flow
+### UC-WEB-040 Прерывание незавершенного draft flow
 
-- условие: есть активный draft или pending input
-- шаги: пользователь пытается уйти на `home/top/settings/...`
-- результат: экран `interrupt_flow` с явным выбором:
+- Предусловие: у пользователя есть draft или pending input.
+- Шаги: пользователь пытается уйти на `home`, `top`, `settings`, `history` или другой safe navigation target.
+- Результат: показывается `interrupt_flow` с выбором:
   - `continue_draft`
   - `discard_draft_and_go`
-  - `save_draft_and_go` только если draft валиден
+  - `save_draft_and_go`, если draft уже валиден для сохранения
 
-### UC-WEB-041 Прерывание во время ввода без items
+### UC-WEB-041 Прерывание на этапе выбора банка или метода ввода
 
-- условие: выбран банк и метод ввода, но категории еще не внесены
-- результат: тоже показывается `interrupt_flow`, silent drop состояния нет
+- Предусловие: банк уже выбран, но cashback items еще не сохранены.
+- Шаги: пользователь покидает текущий flow.
+- Результат: состояние не теряется молча, показывается interrupt screen.
 
-## 6. Ошибки и защитные ветки
+## 6. Ошибки и guardrails
 
 ### UC-WEB-050 OCR ошибки
 
-- кейсы: `file_too_large`, `broken_image`, `ocr_empty`, `ocr_timeout`
-- результат: локализованное сообщение и сохранение валидного экрана
+- Кейсы: слишком большой файл, битое изображение, пустой OCR result, timeout.
+- Результат: показывается локализованная ошибка, пользователь остается в валидном состоянии.
 
 ### UC-WEB-051 Невалидный ввод
 
-- кейсы: невалидный процент, пустая категория, неизвестная команда
-- результат: короткая ошибка, сценарий не ломается, есть путь продолжить или отменить
+- Кейсы: невалидный процент, пустая категория, невалидные login data, занятое имя пользователя.
+- Результат: пользователь получает понятную ошибку без потери валидной session или draft state.
 
-### UC-WEB-052 Missing сущности
+### UC-WEB-052 Невалидный Telegram callback
 
-- кейсы: несуществующий банк или категория при удалении или открытии
-- результат: корректная domain error и безопасный экран
+- Кейсы: неподписанный callback, callback для отсутствующей или не привязанной identity.
+- Результат: доступ не предоставляется, пользователь возвращается в landing/login flow.
 
-## 7. Навигационные инварианты
+## 7. Navigation invariants
 
-- любое действие возвращает следующий `Screen` или локализованный статус ошибки
-- на каждом экране есть минимум один безопасный выход: `home`, `back` или `cancel`
-- web не содержит бизнес-логики: только перевод HTTP input в `UserCommand` и рендер `Screen`
+- Web не содержит business logic для ranking, OCR, bank persistence или identity rules.
+- Каждый шаг возвращает либо следующий `Screen`, либо локализованную ошибку.
+- На каждом экране есть безопасный путь назад или домой.
+- Session хранит только platform `user_id` и workflow/session state, а не telegram-centric identity model.

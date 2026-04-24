@@ -2,223 +2,275 @@
 
 ## Назначение
 
-Проект построен как core-first платформа, где Telegram и web являются внешними адаптерами. Бизнес-сценарии должны переиспользоваться из другого транспорта, например REST API или другого UI, без переписывания application logic.
+Система построена как platform core с тонкими delivery adapters.
+Business rules, workflow state, ranking, parsing и persistence contracts живут вне Telegram и вне HTTP.
 
-## Слоистая модель
+Текущая основная platform surface: web с local credentials.
+Текущий secondary adapter: Telegram.
+
+Важная оговорка:
+
+- архитектура уже web-first
+- code defaults и `.env.example` теперь по умолчанию задают web-first local mode
+- Telegram features включаются явно через config, а не через bootstrap bias
+
+## Карта слоёв
 
 ```mermaid
 flowchart LR
-    TG["Telegram Adapter"] --> APP["Application Layer"]
-    WEB["Web Adapter"] --> APP
+    WEB["Web Adapter"] --> APP["Application Layer"]
+    TG["Telegram Adapter"] --> APP
     SCHED["Reminder Scheduler"] --> APP
     APP --> DOM["Domain Layer"]
-    APP --> PORTS["Ports"]
+    APP --> PORTS["Application Ports"]
     PORTS --> PG["PostgreSQL Adapter"]
     PORTS --> OCR["Tesseract OCR Adapter"]
-    PORTS --> SEND["Reminder Sender Adapter"]
-    PORTS --> CLOCK["Clock Adapter"]
+    PORTS --> AUTHL["Local Auth Adapter"]
+    PORTS --> AUTHT["Telegram Auth Adapter"]
+    PORTS --> REM["Reminder Sender Adapter"]
 ```
 
-## Ответственность слоев
+## Ответственность слоёв
 
 ### Domain
 
-Расположение: [app/domain](C:\Users\Kuznetz\Desktop\proga\cashback_bot\app\domain)
+Расположение: `app/domain`
 
-Содержит чистую доменную логику и не знает о Telegram, FastAPI, SQLAlchemy session и transport state.
+Содержит transport-neutral business entities и domain rules.
 
-Основные обязанности:
+Примеры:
 
-- доменные модели: `UserProfile`, `CashbackDraftItem`, `BankAggregate`
-- enums и domain errors
-- нормализация категорий и работа с синонимами
-- parsing helpers для natural language
-- ranking rules и tie-handling
+- `UserAccount`
+- `UserIdentity`
+- `LocalCredentials`
+- `DeliveryTarget`
+- `BankAggregate`
+- `CashbackDraftItem`
+- category normalization и ranking services
+
+Domain не должен импортировать FastAPI, aiogram, SQLAlchemy или adapter code.
 
 ### Application
 
-Расположение: [app/application](C:\Users\Kuznetz\Desktop\proga\cashback_bot\app\application)
+Расположение: `app/application`
 
-Содержит use cases и orchestration пользовательских workflow. Это поведенческий центр системы.
+Содержит use cases, workflow state, transport-neutral screen models и infrastructure ports.
 
-Основные обязанности:
+Основные зоны:
 
-- `UserCommand`, `Screen`, `Action`, `WorkflowState`, `WorkflowResult`
-- workflow execution через `handle_command(...)`
-- user sync
-- reminder policy
-- application event logging
-- доступ к persistence и OCR только через ports
+- `app/application/auth`: registration, login, external identity auth, link, unlink
+- `app/application/dto`: transport-neutral DTO, например `ImageUpload`
+- `app/application/use_cases`: business operations для banks, history, reminders, OCR processing
+- `app/application/workflow`: workflow contracts, dispatcher, scenario handlers
+- `app/application/presenters`: screen factories и formatting helpers
 
-Основные контракты:
+Правило:
 
-```python
-sync_user(context) -> UserProfile
-handle_command(user, workflow_state, command) -> WorkflowResult
-send_monthly_reminders() -> int
-log_event(user_id, action, payload) -> None
-```
+application code может зависеть только от domain и application contracts.
 
 ### Adapters
 
-Расположение: [app/adapters](C:\Users\Kuznetz\Desktop\proga\cashback_bot\app\adapters)
+Расположение: `app/adapters`
 
-Реализуют transport и infrastructure integration.
+Concrete integration layer.
 
-- `postgres`: SQLAlchemy models, repositories, unit of work, session factory
-- `telegram`: update mapping, callback decoding, inline screen rendering, FSM bridge
-- `web`: FastAPI app, Telegram Login verification, SSR templates, session-backed workflow persistence
-- `ocr_tesseract`: image preprocessing и OCR extraction
-- `scheduler`: reminder async loop
-- `system`: clock и reminder sender helpers
+- `postgres`: repositories, unit of work, SQLAlchemy models
+- `auth_local`: password hashing и verification
+- `auth_telegram`: Telegram Login verification
+- `telegram`: aiogram routing и rendering
+- `web`: FastAPI routes, sessions, SSR templates
+- `ocr_tesseract`: image-to-text extraction из `ImageUpload`
+- `system`: reminder delivery helpers
+
+Adapters могут зависеть от application contracts.
+Application и domain не должны зависеть от adapters.
 
 ### Bootstrap
 
-Расположение: [app/bootstrap](C:\Users\Kuznetz\Desktop\proga\cashback_bot\app\bootstrap)
+Расположение: `app/bootstrap`
 
-Собирает runtime graph.
-
-Обязанности:
+Отвечает только за runtime wiring:
 
 - загрузка settings
-- конфигурация logging
-- проверка и создание базы
-- сборка core container и facade
-- применение миграций
-- запуск включенных адаптеров
+- logging
+- readiness базы
+- migrations
+- сборка container
+- startup adapters
+- lifecycle reminder loop, если reminder delivery provider явно сконфигурирован
 
-## Основной runtime flow
+## Identity Model
+
+Платформа больше не считает Telegram канонической user identity.
+
+Таблицы:
+
+- `users`: platform account
+- `user_identities`: linked external identities, например Telegram
+- `local_credentials`: local username/email/password hash
+
+Следствия:
+
+- web user может существовать без Telegram
+- Telegram identity может быть привязана к существующему platform account
+- reminder routing определяется через linked identities, а не через поля `users`
+
+Compatibility note:
+
+- legacy `users.telegram_user_id`, `username` и `full_name` остаются в schema как deprecated compatibility seam
+- новая runtime-логика больше не зеркалит linked Telegram identity обратно в эти колонки
+- новым application/business code нельзя считать эти legacy fields authoritative source
+
+## Authentication Model
+
+### Web
+
+Поддерживает:
+
+- local registration
+- local login
+- logout
+- Telegram identity link и unlink
+
+Unlinked Telegram callbacks не могут молча создавать произвольные web sessions.
+Они принимаются только для уже linked identity или для explicit linking из authenticated session.
+
+### Telegram
+
+Telegram adapter локально маппит `from_user` в `ExternalIdentityContext(provider="telegram", ...)`, а затем вызывает shared external identity authentication use case.
+Это сохраняет bot-first compatibility без возврата к telegram-centric core model.
+
+## Workflow Model
+
+Продукт остаётся screen-driven.
+Adapters переводят transport events в общий `UserCommand` и рендерят возвращённый `Screen`.
+
+`WorkflowState` хранит:
+
+- selected bank
+- target month
+- draft items
+- pending input kind
+- edit pointer
+- interrupt target
+
+`Screen` описывает:
+
+- screen id
+- title/body localization keys
+- action list
+- optional input expectation
+- optional layout hint
+
+Текущий workflow split:
+
+- `dispatcher.py`: orchestration и routing
+- `interrupts.py`: interrupt policy
+- `draft.py`: draft creation/edit/save flow
+- `banks.py`: saved-bank flow
+- `navigation.py`: home/help/top/settings/history flow
+- `text_intents.py`: free-text routing
+- `workflow_screens.py`: построение `Screen`
+- `workflow_formatters.py`: форматирование screen body
+
+Благодаря этому Telegram и web переиспользуют одну и ту же логическую семантику workflow.
+
+## Month Snapshot Model
+
+Cashback data теперь хранится как month-aware snapshots вместо одного mutable bank state.
+
+Следствия:
+
+- один и тот же банк может иметь разные наборы категорий для `previous`, `current` и `next` month
+- OCR/manual/template ingestion сначала создаёт draft, затем draft привязывается к банку и target month
+- bank details и edit flow работают с месяцем явно, не перетирая другой snapshot случайно
+
+Persistence consequences:
+
+- `cashback_items` содержит `target_month`
+- repository operations month-scoped для list/replace behavior
+- ranking использует только current month snapshot
+
+## OCR And Attach Flow
+
+Упрощённый ingestion flow намеренно transport-neutral:
+
+1. adapter отправляет image bytes или text в workflow
+2. workflow парсит категории в draft
+3. если банк уже выбран, preview открывается сразу
+4. если сохранён ровно один банк, workflow выбирает его автоматически
+5. иначе открывается явный attach-to-bank screen
+6. пользователь подтверждает target month и сохраняет результат
+
+Цель:
+
+- скриншот или фото должны сразу вести к полезному следующему действию, а не к тупиковому OCR output
+
+## File Upload Model
+
+OCR больше не зависит от filesystem paths в application contract.
+
+Application работает с `ImageUpload`:
+
+- `content: bytes`
+- `filename: str`
+- `content_type: str`
+
+Любая временная работа с файлами остаётся внутри конкретного adapter.
+
+## Reminder Delivery
+
+Ежемесячные reminders теперь разрешаются через delivery targets из linked identities.
+
+Текущее operational behavior:
+
+- reminder use case запрашивает `user_identities` через `list_delivery_targets(...)`
+- delivery provider инжектируется через bootstrap/runtime wiring через `REMINDER_DELIVERY_PROVIDER`
+- sender adapter доставляет `DeliveryTarget`
+- `bootstrap.runtime` владеет lifecycle reminder loop
+- Telegram bot остаётся текущей delivery implementation, но не owner scheduler
+- bundled compose posture закрепляет ownership reminder delivery только за Telegram profile service
+
+Это убирает старое предположение, что `users.telegram_user_id` — единственный delivery address.
+
+## Runtime Flow
 
 ```mermaid
 sequenceDiagram
     participant Main as app.main
     participant Runtime as bootstrap.runtime
     participant DB as PostgreSQL
-    participant Core as ApplicationFacade
-    participant Tg as Telegram Adapter
+    participant Facade as ApplicationFacade
+    participant Sched as Reminder Runtime
     participant Web as Web Adapter
+    participant Tg as Telegram Adapter
 
     Main->>Runtime: run_app()
-    Runtime->>DB: ensure database exists
     Runtime->>DB: wait for connection
     Runtime->>DB: alembic upgrade head
-    Runtime->>Core: build container + facade
-    Runtime->>Tg: start if enabled
+    Runtime->>Facade: build container
+    Runtime->>Sched: start if reminder delivery provider is configured
     Runtime->>Web: start if enabled
+    Runtime->>Tg: start if enabled
 ```
 
-## Workflow model
+## Invariants
 
-Продукт является screen-driven, а не transport-driven.
+- `app.domain` не импортирует adapter или framework code
+- `app.application` не импортирует adapter packages или ORM models
+- `app.application.workflow` не импортирует framework или persistence boundary напрямую
+- `app.application.presenters` не импортирует adapters
+- `app.adapters.web` не импортирует `app.adapters.telegram`
+- shared localization живёт в `app.i18n`
+- adapters можно менять без переписывания business rules
 
-`WorkflowState` хранит:
+## Residual Technical Debt
 
-- текущий mode (`create`, `edit` или `None`)
-- ссылку на выбранный банк
-- draft cashback items
-- индекс редактируемого item
-- ожидаемый тип ввода
-- временный payload для незавершенных действий
+Крупная workflow decomposition завершена.
+Оставшийся debt теперь уже уже и конкретнее:
 
-`Screen` описывает, что должен отрисовать UI:
+- `app/application/workflow/draft.py` — самый крупный workflow module и следующий hotspot
+- legacy Telegram columns остаются в schema как deprecated compatibility seam
+- пока существует только Telegram implementation для reminder delivery; другие providers остаются отдельной задачей
 
-- `id`
-- `title_key`
-- `body_key`
-- `body_params`
-- `actions`
-- `expects_input`
-- `layout_hint`
-
-`Action` описывает, что UI может отправить обратно:
-
-- `command`
-- `label_key`
-- `payload`
-- `variant`
-- `group`
-- `destructive`
-
-Благодаря этому Telegram и web могут отображать один и тот же логический экран по-разному, не меняя business semantics.
-
-## Telegram flow
-
-Расположение: [app/adapters/telegram/router.py](C:\Users\Kuznetz\Desktop\proga\cashback_bot\app\adapters\telegram\router.py)
-
-Высокоуровневый flow:
-
-1. Преобразовать message или callback в `UserCommand`.
-2. Загрузить workflow state из FSM storage.
-3. Вызвать `facade.handle_command(...)`.
-4. Сохранить обновленное workflow state.
-5. Отрендерить `Screen`.
-6. Применить side effects: transient status, logs и т.д.
-
-Telegram-specific concerns остаются в адаптере:
-
-- callback parsing
-- lifecycle inline keyboard
-- временная загрузка фото
-- FSM storage
-
-## Web flow
-
-Расположение: [app/adapters/web/app.py](C:\Users\Kuznetz\Desktop\proga\cashback_bot\app\adapters\web\app.py)
-
-Высокоуровневый flow:
-
-1. Аутентифицировать пользователя через Telegram Login widget.
-2. Сохранить в session user profile, workflow state и last screen.
-3. Преобразовать form submit или upload в `UserCommand`.
-4. Вызвать тот же application facade.
-5. Отрендерить `Screen` через SSR template.
-
-Web-specific concerns остаются в адаптере:
-
-- session cookies
-- Telegram auth verification
-- HTML templates и CSS
-- file upload handling
-
-## Persistence model
-
-Долговременная база хранит business data и историю, но не хранит UI session state.
-
-Таблицы:
-
-- `users`
-- `banks`
-- `cashback_items`
-- `user_logs`
-
-Ключевое правило:
-
-- при обновлении банка полный набор `cashback_items` заменяется атомарно в рамках транзакции
-
-Transport session state специально недолговечен:
-
-- Telegram flow state живет в FSM memory storage
-- Web flow state живет в signed session storage
-
-## Error model
-
-Domain и validation failures поднимаются как domain errors и отображаются адаптерами в локализованные сообщения.
-
-Примеры:
-
-- слишком большой файл
-- битое изображение
-- OCR не дал полезного текста
-- невалидный процент
-- банк или категория не найдены
-- неизвестная команда
-
-Операционные ошибки логируются и показываются как короткие user-facing ошибки без падения процесса.
-
-## Архитектурные инварианты
-
-- Domain не должен импортировать `aiogram`, `fastapi`, `sqlalchemy` или transport session state.
-- Application не должен зависеть от ORM models или `AsyncSession`.
-- Adapters могут зависеть от application contracts, но не наоборот.
-- Telegram и web должны использовать одну и ту же семантику `handle_command(...)`.
-- UI navigation не должна создавать dead ends: на каждом экране нужен безопасный путь выхода.
+Это compatibility и maintenance concerns, а не архитектурные блокеры.

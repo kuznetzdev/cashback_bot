@@ -4,7 +4,8 @@ from datetime import datetime
 from typing import Protocol
 
 from app.application.dto.media import ImageUpload
-from app.domain.models import Bank, CashbackDraftItem, LocalCredentials, ReminderTarget, UserAccount, UserIdentity, UserLogEntry
+from app.application.workflow.models import WorkflowState
+from app.domain.models import Bank, CashbackDraftItem, DeliveryTarget, LocalCredentials, UserAccount, UserIdentity, UserLogEntry
 from app.domain.services.ranking import RankingEntry
 
 
@@ -49,7 +50,7 @@ class UserIdentityRepositoryPort(Protocol):
     async def remove_for_user(self, *, user_id: int, provider: str) -> bool:
         ...
 
-    async def list_reminder_targets(self, *, provider: str) -> list[ReminderTarget]:
+    async def list_delivery_targets(self, *, provider: str) -> list[DeliveryTarget]:
         ...
 
 
@@ -98,10 +99,13 @@ class BankRepositoryPort(Protocol):
 
 
 class CashbackRepositoryPort(Protocol):
-    async def list_for_bank(self, bank_id: int) -> list[CashbackDraftItem]:
+    async def list_for_bank(self, bank_id: int, target_month: str | None = None) -> list[CashbackDraftItem]:
         ...
 
-    async def replace_for_bank(self, bank_id: int, items: list[CashbackDraftItem]) -> None:
+    async def replace_for_bank(self, bank_id: int, target_month: str, items: list[CashbackDraftItem]) -> None:
+        ...
+
+    async def list_months_for_bank(self, bank_id: int) -> list[str]:
         ...
 
 
@@ -116,6 +120,17 @@ class LogRepositoryPort(Protocol):
         ...
 
 
+class WorkflowStateRepositoryPort(Protocol):
+    async def get_for_user(self, user_id: int) -> WorkflowState | None:
+        ...
+
+    async def save_for_user(self, user_id: int, state: WorkflowState) -> None:
+        ...
+
+    async def delete_for_user(self, user_id: int) -> None:
+        ...
+
+
 class UnitOfWorkPort(Protocol):
     users: UserRepositoryPort
     identities: UserIdentityRepositoryPort
@@ -123,6 +138,7 @@ class UnitOfWorkPort(Protocol):
     banks: BankRepositoryPort
     cashback: CashbackRepositoryPort
     logs: LogRepositoryPort
+    workflow_states: WorkflowStateRepositoryPort
 
     async def __aenter__(self) -> "UnitOfWorkPort":
         ...
@@ -143,7 +159,7 @@ class OCRPort(Protocol):
 
 
 class ReminderSenderPort(Protocol):
-    async def send_monthly_reminder(self, target: ReminderTarget) -> None:
+    async def send_monthly_reminder(self, target: DeliveryTarget) -> None:
         ...
 
 

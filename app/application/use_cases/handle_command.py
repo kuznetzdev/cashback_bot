@@ -17,6 +17,7 @@ from app.application.use_cases.toggle_notifications import ToggleNotificationsUs
 from app.application.workflow.dependencies import WorkflowDependencies
 from app.application.workflow.dispatcher import WorkflowDispatcher
 from app.application.workflow.models import UserCommand, WorkflowResult, WorkflowState
+from app.application.workflow.resume import resume_workflow
 from app.application.contracts.ports import OCRPort, UnitOfWorkPort
 from app.domain.models import UserAccount
 from app.domain.services.categories import CategoryService
@@ -89,7 +90,11 @@ class HandleCommandUseCase:
             ),
             popular_banks=POPULAR_BANKS,
         )
+        self.deps = deps
         self.dispatcher = WorkflowDispatcher(deps)
 
     async def execute(self, user: UserAccount, state: WorkflowState, command: UserCommand) -> WorkflowResult:
         return await self.dispatcher.execute(user, state, command)
+
+    async def resume(self, user: UserAccount, state: WorkflowState) -> WorkflowResult:
+        return await resume_workflow(self.deps, user, state)

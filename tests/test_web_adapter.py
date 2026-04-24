@@ -13,7 +13,7 @@ from PIL import Image
 from app.adapters.auth_local import Argon2PasswordHasher
 from app.adapters.system import NoopReminderSender, SystemClock
 from app.adapters.web.app import WebDependencies, create_web_app
-from app.application import ApplicationFacade
+from app.application.facade import ApplicationFacade
 from app.application.auth.use_cases import (
     AuthenticateExternalIdentityUseCase,
     AuthenticateLocalUserUseCase,
@@ -24,9 +24,10 @@ from app.application.auth.use_cases import (
     UnlinkExternalIdentityUseCase,
 )
 from app.application.use_cases.handle_command import HandleCommandUseCase
+from app.application.use_cases.get_workflow_state import GetWorkflowStateUseCase
 from app.application.use_cases.log_event import LogEventUseCase
+from app.application.use_cases.save_workflow_state import SaveWorkflowStateUseCase
 from app.application.use_cases.send_monthly_reminders import SendMonthlyRemindersUseCase
-from app.application.use_cases.sync_user import SyncTelegramUserUseCase
 from app.domain.services.categories import CategoryService
 from app.domain.services.parsing import ParserService
 from app.domain.services.ranking import RankingService
@@ -46,7 +47,6 @@ def _build_facade(uow_factory, dummy_ocr) -> ApplicationFacade:
         UnlinkExternalIdentityUseCase(uow_factory),
         GetUserAccountUseCase(uow_factory),
         ListExternalIdentitiesUseCase(uow_factory),
-        SyncTelegramUserUseCase(uow_factory, default_language="ru"),
         HandleCommandUseCase(
             uow_factory=uow_factory,
             parser=parser,
@@ -54,11 +54,14 @@ def _build_facade(uow_factory, dummy_ocr) -> ApplicationFacade:
             ranking=ranking,
             ocr=dummy_ocr,
         ),
+        GetWorkflowStateUseCase(uow_factory),
+        SaveWorkflowStateUseCase(uow_factory),
         SendMonthlyRemindersUseCase(
             uow_factory=uow_factory,
             sender=NoopReminderSender(),
             clock=SystemClock("Europe/Moscow"),
             reminder_hour=10,
+            delivery_provider=None,
         ),
         LogEventUseCase(uow_factory),
     )
@@ -126,6 +129,18 @@ def test_web_local_register_and_manual_flow(uow_factory, dummy_ocr, tmp_path: Pa
     saved = client.post("/app/action", data={"command": "save_bank", "payload_json": "{}"})
     assert saved.status_code == 200
     assert "T-Bank" in saved.text
+
+
+def test_web_home_renders_flow_summary_and_grouped_actions(uow_factory, dummy_ocr, tmp_path: Path) -> None:
+    client = _build_client(uow_factory, dummy_ocr, tmp_path)
+    _register(client, username="summary_user")
+
+    home = client.get("/app")
+
+    assert home.status_code == 200
+    assert 'data-flow-summary="true"' in home.text
+    assert 'data-action-section="primary"' in home.text
+    assert 'data-action-section="navigation"' in home.text
 
 
 def test_web_photo_flow_uses_bytes_upload_contract(uow_factory, dummy_ocr, tmp_path: Path) -> None:
@@ -231,3 +246,22 @@ def test_authenticated_user_can_link_and_unlink_telegram(uow_factory, dummy_ocr,
     unlink = client.post("/auth/telegram/unlink", follow_redirects=False)
     assert unlink.status_code == 303
     assert all(identity.provider_user_id != "999" for identity in store.identities.values())
+
+
+def test_web_home_allows_direct_upload_without_photo_mode(uow_factory, dummy_ocr, tmp_path: Path) -> None:
+    dummy_ocr.value = "Fuel 5%\nTaxi 3%"
+    client = _build_client(uow_factory, dummy_ocr, tmp_path)
+    _register(client)
+
+    home = client.get("/app")
+    assert home.status_code == 200
+    assert "data-upload-input" in home.text
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (60, 30), color="white").save(buffer, format="PNG")
+    buffer.seek(0)
+    response = client.post("/app/upload", files={"file": ("screen.png", buffer.getvalue(), "image/png")})
+
+    assert response.status_code == 200
+    assert 'data-screen="choose_bank"' in response.text
+    assert "Другой банк" in response.text or "Other Bank" in response.text

@@ -2,19 +2,23 @@ from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
 
+from app.application.months import current_month_key, normalize_month_key, shift_month_key
 from app.application.presenters import workflow_screens
 from app.application.workflow.dependencies import WorkflowDependencies, log_workflow_event
 from app.application.workflow.models import UserCommand, WorkflowResult, WorkflowState
 from app.domain.enums import SourceType
 from app.domain.errors import ValidationError
-from app.domain.models import CashbackDraftItem, UserAccount
+from app.domain.models import Bank, CashbackDraftItem, UserAccount
 
 
 DRAFT_COMMANDS = {
     "open_add_bank",
+    "select_existing_bank",
     "select_bank_preset",
     "select_bank_other",
     "submit_custom_bank_name",
+    "change_selected_bank",
+    "set_target_month",
     "choose_input_method",
     "submit_manual_text",
     "submit_uploaded_image",
@@ -37,24 +41,23 @@ async def handle_command(
 ) -> WorkflowResult | None:
     name = command.name
     if name == "open_add_bank":
-        return workflow_screens.result_with_screen(
-            user=user,
-            state=WorkflowState(mode="create"),
-            screen=workflow_screens.choose_bank_screen(list(deps.popular_banks)),
-        )
+        fresh_state = WorkflowState(mode="create", target_month=current_month_key())
+        return await _render_bank_selection(deps, user, fresh_state)
+    if name == "change_selected_bank":
+        return await _render_bank_selection(deps, user, state, has_draft=bool(state.draft_items))
+    if name == "select_existing_bank":
+        return await _select_existing_bank(deps, user, state, int(command.payload["id"]))
     if name == "select_bank_preset":
         index = int(command.payload["index"])
         if index < 0 or index >= len(deps.popular_banks):
             raise ValidationError("errors.invalid_bank_name")
+        source_type = state.temp_payload.get("source_type")
         state.selected_bank_name = deps.popular_banks[index]
         state.selected_bank_id = None
         state.pending_input_kind = None
-        state.temp_payload = {}
-        return workflow_screens.result_with_screen(
-            user=user,
-            state=state,
-            screen=workflow_screens.input_method_screen(state.selected_bank_name),
-        )
+        state.target_month = state.target_month or current_month_key()
+        state.temp_payload = {"source_type": source_type} if source_type is not None else {}
+        return _render_after_bank_selected(user, state, deps)
     if name == "select_bank_other":
         state.pending_input_kind = "custom_bank_name"
         return workflow_screens.result_with_screen(user=user, state=state, screen=workflow_screens.custom_bank_prompt_screen())
@@ -65,17 +68,29 @@ async def handle_command(
         state.selected_bank_name = bank_name
         state.selected_bank_id = None
         state.pending_input_kind = None
-        return workflow_screens.result_with_screen(user=user, state=state, screen=workflow_screens.input_method_screen(bank_name))
+        state.target_month = state.target_month or current_month_key()
+        return _render_after_bank_selected(user, state, deps)
+    if name == "set_target_month":
+        offset = int(command.payload.get("offset", 0))
+        base_month = state.target_month or current_month_key()
+        state.target_month = current_month_key() if offset == 0 else shift_month_key(base_month, offset)
+        return workflow_screens.result_with_screen(
+            user=user,
+            state=state,
+            screen=workflow_screens.preview_screen(state, user.language, deps.categories),
+        )
     if name == "choose_input_method":
         method = str(command.payload["method"])
         if method == "manual":
             state.pending_input_kind = "manual_lines"
             state.temp_payload["source_type"] = SourceType.MANUAL.value
+            state.target_month = state.target_month or current_month_key()
             await log_workflow_event(deps, user.id, "input_method_selected", {"method": "manual"})
             return workflow_screens.result_with_screen(user=user, state=state, screen=workflow_screens.manual_prompt_screen())
         if method == "photo":
             state.pending_input_kind = "photo_upload"
             state.temp_payload["source_type"] = SourceType.OCR.value
+            state.target_month = state.target_month or current_month_key()
             await log_workflow_event(deps, user.id, "input_method_selected", {"method": "photo"})
             return workflow_screens.result_with_screen(user=user, state=state, screen=workflow_screens.photo_prompt_screen())
         if method == "template":
@@ -90,35 +105,29 @@ async def handle_command(
                 )
                 for slug in deps.categories.template_slugs()
             ]
+            state.target_month = state.target_month or current_month_key()
             await log_workflow_event(deps, user.id, "draft_loaded_template", {"items_count": len(state.draft_items)})
-            return workflow_screens.result_with_screen(
-                user=user,
-                state=state,
-                screen=workflow_screens.preview_screen(state, user.language, deps.categories),
-            )
+            return await _render_after_items_loaded(deps, user, state)
         raise ValidationError("errors.send_photo_or_text")
     if name == "submit_manual_text":
+        state.temp_payload["source_type"] = str(state.temp_payload.get("source_type", SourceType.MANUAL.value))
         state.draft_items = deps.parse_manual_use_case.execute(str(command.payload["text"]))
         state.pending_input_kind = None
+        state.target_month = state.target_month or current_month_key()
         await log_workflow_event(deps, user.id, "draft_loaded_manual", {"items_count": len(state.draft_items)})
-        return workflow_screens.result_with_screen(
-            user=user,
-            state=state,
-            screen=workflow_screens.preview_screen(state, user.language, deps.categories),
-        )
+        return await _render_after_items_loaded(deps, user, state)
     if name == "submit_uploaded_image":
         upload_obj = command.payload.get("upload")
         if upload_obj is None:
             raise ValidationError("errors.broken_image")
+        state.temp_payload["source_type"] = str(state.temp_payload.get("source_type", SourceType.OCR.value))
         state.draft_items = await deps.process_uploaded_image_use_case.execute(upload_obj)
         state.pending_input_kind = None
+        state.target_month = state.target_month or current_month_key()
         await log_workflow_event(deps, user.id, "draft_loaded_ocr", {"items_count": len(state.draft_items)})
-        return workflow_screens.result_with_screen(
-            user=user,
-            state=state,
-            screen=workflow_screens.preview_screen(state, user.language, deps.categories),
-        )
+        return await _render_after_items_loaded(deps, user, state)
     if name == "open_preview":
+        state.target_month = state.target_month or current_month_key()
         return workflow_screens.result_with_screen(
             user=user,
             state=state,
@@ -171,11 +180,87 @@ async def save_bank(deps: WorkflowDependencies, user_id: int, state: WorkflowSta
         user_id=user_id,
         bank_id=state.selected_bank_id,
         bank_name=state.selected_bank_name or "",
+        target_month=normalize_month_key(state.target_month or current_month_key()),
         items=state.draft_items,
     )
     state.selected_bank_id = bank_id
     state.pending_input_kind = None
     return bank_id
+
+
+async def _select_existing_bank(
+    deps: WorkflowDependencies,
+    user: UserAccount,
+    state: WorkflowState,
+    bank_id: int,
+) -> WorkflowResult:
+    banks = await deps.get_user_banks_use_case.execute(user_id=user.id)
+    selected = next((bank for bank in banks if bank.id == bank_id), None)
+    if selected is None:
+        raise ValidationError("errors.bank_not_found")
+    state.selected_bank_id = selected.id
+    state.selected_bank_name = selected.bank_name
+    state.pending_input_kind = None
+    state.target_month = state.target_month or current_month_key()
+    return _render_after_bank_selected(user, state, deps)
+
+
+async def _render_bank_selection(
+    deps: WorkflowDependencies,
+    user: UserAccount,
+    state: WorkflowState,
+    *,
+    has_draft: bool = False,
+) -> WorkflowResult:
+    existing_banks = await deps.get_user_banks_use_case.execute(user_id=user.id)
+    return workflow_screens.result_with_screen(
+        user=user,
+        state=state,
+        screen=workflow_screens.choose_bank_screen(
+            existing_banks=existing_banks,
+            popular_banks=list(deps.popular_banks),
+            has_draft=has_draft,
+            target_month=state.target_month,
+        ),
+    )
+
+
+def _render_after_bank_selected(user: UserAccount, state: WorkflowState, deps: WorkflowDependencies) -> WorkflowResult:
+    if state.draft_items:
+        return workflow_screens.result_with_screen(
+            user=user,
+            state=state,
+            screen=workflow_screens.preview_screen(state, user.language, deps.categories),
+        )
+    return workflow_screens.result_with_screen(
+        user=user,
+        state=state,
+        screen=workflow_screens.input_method_screen(state.selected_bank_name or "-", state.target_month),
+    )
+
+
+async def _render_after_items_loaded(
+    deps: WorkflowDependencies,
+    user: UserAccount,
+    state: WorkflowState,
+) -> WorkflowResult:
+    if state.selected_bank_name:
+        return workflow_screens.result_with_screen(
+            user=user,
+            state=state,
+            screen=workflow_screens.preview_screen(state, user.language, deps.categories),
+        )
+    existing_banks = await deps.get_user_banks_use_case.execute(user_id=user.id)
+    if len(existing_banks) == 1:
+        selected = existing_banks[0]
+        state.selected_bank_id = selected.id
+        state.selected_bank_name = selected.bank_name
+        return workflow_screens.result_with_screen(
+            user=user,
+            state=state,
+            screen=workflow_screens.preview_screen(state, user.language, deps.categories),
+        )
+    return await _render_bank_selection(deps, user, state, has_draft=True)
 
 
 async def _submit_item_category(

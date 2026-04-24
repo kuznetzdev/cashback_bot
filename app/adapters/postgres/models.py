@@ -25,6 +25,7 @@ class UserModel(Base):
 
     id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True, autoincrement=True)
     display_name: Mapped[str] = mapped_column(Text, nullable=False)
+    # Deprecated compatibility seam retained for legacy migrations and rollback paths.
     telegram_user_id: Mapped[int | None] = mapped_column(BigInteger, unique=True, nullable=True)
     username: Mapped[str | None] = mapped_column(Text, nullable=True)
     full_name: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -87,11 +88,13 @@ class CashbackItemModel(Base):
     __tablename__ = "cashback_items"
     __table_args__ = (
         Index("ix_cashback_items_bank_id", "bank_id"),
+        Index("ix_cashback_items_bank_id_target_month", "bank_id", "target_month"),
         Index("ix_cashback_items_normalized_category", "normalized_category"),
     )
 
     id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True, autoincrement=True)
     bank_id: Mapped[int] = mapped_column(ForeignKey("banks.id", ondelete="CASCADE"), nullable=False)
+    target_month: Mapped[str] = mapped_column(String(7), nullable=False)
     raw_category: Mapped[str] = mapped_column(Text, nullable=False)
     normalized_category: Mapped[str] = mapped_column(Text, nullable=False)
     percent: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
@@ -109,3 +112,12 @@ class UserLogModel(Base):
     action: Mapped[str] = mapped_column(Text, nullable=False)
     payload_json: Mapped[dict | None] = mapped_column(JSON_VARIANT, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(), nullable=False, default=utcnow)
+
+
+class WorkflowStateModel(Base):
+    __tablename__ = "workflow_states"
+
+    user_id: Mapped[int] = mapped_column(BIGINT_PK, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    state_json: Mapped[dict] = mapped_column(JSON_VARIANT, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(), nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(), nullable=False, default=utcnow, onupdate=utcnow)

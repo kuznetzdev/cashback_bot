@@ -21,10 +21,14 @@ Stores external identities in normalized form:
 
 - `user_id`
 - `provider`
-- `external_user_id`
-- `username`
-- `display_name`
-- `reminder_enabled`
+- `provider_user_id`
+- `provider_username`
+- `provider_display_name`
+
+Constraints:
+
+- unique `(provider, provider_user_id)`
+- unique `(user_id, provider)`
 
 ### `local_credentials`
 
@@ -40,8 +44,9 @@ Stores local auth material:
 Legacy users with `users.telegram_user_id` are backfilled into `user_identities` with:
 
 - `provider = "telegram"`
-- `external_user_id = users.telegram_user_id`
-- best-effort username/display name copy
+- `provider_user_id = CAST(users.telegram_user_id AS TEXT)`
+- `provider_username = users.username`
+- `provider_display_name = users.full_name`
 
 If duplicate Telegram ids exist in legacy data, the migration keeps the user with the smallest `users.id` as the owner of that Telegram identity.
 
@@ -51,6 +56,18 @@ If duplicate Telegram ids exist in legacy data, the migration keeps the user wit
 - web local auth becomes possible
 - reminder delivery resolves targets through `user_identities`
 - `users.telegram_user_id` is no longer the authoritative identity source
+
+## Compatibility Notes
+
+The migration establishes `user_identities` as the source of truth for external identities.
+Legacy columns on `users` remain in the schema as deprecated compatibility data:
+
+- `users.telegram_user_id`
+- `users.username`
+- `users.full_name`
+
+New runtime writes no longer mirror Telegram linkage into those columns.
+New application logic must not treat these legacy columns as the canonical identity model.
 
 ## Operational Checklist
 
@@ -66,6 +83,19 @@ After migration:
 2. verify at least one legacy Telegram user can still authenticate in the bot
 3. verify local registration/login works in web
 4. verify monthly reminder target query returns Telegram-linked users
+
+## Reminder Behavior After Migration
+
+Current reminder flow:
+
+- selects reminder targets from `user_identities`
+- resolves transport through a delivery provider injected by bootstrap wiring
+- starts the reminder loop from application runtime rather than Telegram polling lifecycle
+- now reads the delivery provider from `REMINDER_DELIVERY_PROVIDER`
+- bundled compose keeps reminder ownership on the Telegram profile service
+- uses `users.notifications_enabled` as the on/off switch
+
+This means reminder routing is identity-based, while the current operational delivery transport remains Telegram-specific by configuration rather than by application hardcode or Telegram adapter ownership.
 
 ## Rollback Notes
 

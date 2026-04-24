@@ -20,28 +20,46 @@ async def handle_command(
         banks = await deps.get_user_banks_use_case.execute(user_id=user.id)
         return workflow_screens.result_with_screen(user=user, state=state, screen=workflow_screens.my_banks_screen(banks))
     if name == "open_bank":
-        aggregate = await load_bank_aggregate(deps, user.id, int(command.payload["id"]))
+        aggregate = await load_bank_aggregate(
+            deps,
+            user.id,
+            int(command.payload["id"]),
+            _payload_month(command),
+        )
         return workflow_screens.result_with_screen(
             user=user,
             state=state,
             screen=workflow_screens.bank_details_screen(aggregate, user.language, deps.categories),
         )
     if name == "edit_bank":
-        aggregate = await load_bank_aggregate(deps, user.id, int(command.payload["id"]))
+        aggregate = await load_bank_aggregate(
+            deps,
+            user.id,
+            int(command.payload["id"]),
+            _payload_month(command),
+        )
         state.mode = "edit"
         state.selected_bank_id = aggregate.bank.id
         state.selected_bank_name = aggregate.bank.bank_name
         state.draft_items = aggregate.items
+        state.target_month = aggregate.target_month
         state.pending_input_kind = None
         if aggregate.items:
             state.temp_payload["source_type"] = aggregate.items[0].source_type
+        else:
+            state.temp_payload.setdefault("source_type", "manual")
         return workflow_screens.result_with_screen(
             user=user,
             state=state,
             screen=workflow_screens.preview_screen(state, user.language, deps.categories),
         )
     if name == "request_delete_bank":
-        aggregate = await load_bank_aggregate(deps, user.id, int(command.payload["id"]))
+        aggregate = await load_bank_aggregate(
+            deps,
+            user.id,
+            int(command.payload["id"]),
+            _payload_month(command),
+        )
         return workflow_screens.result_with_screen(user=user, state=state, screen=workflow_screens.confirm_delete_bank_screen(aggregate))
     if name == "confirm_delete_bank":
         await deps.delete_bank_use_case.execute(user_id=user.id, bank_id=int(command.payload["id"]))
@@ -53,8 +71,8 @@ async def handle_command(
     return None
 
 
-async def load_bank_aggregate(deps: WorkflowDependencies, user_id: int, bank_id: int):
-    return await deps.get_bank_details_use_case.execute(user_id=user_id, bank_id=bank_id)
+async def load_bank_aggregate(deps: WorkflowDependencies, user_id: int, bank_id: int, target_month: str | None):
+    return await deps.get_bank_details_use_case.execute(user_id=user_id, bank_id=bank_id, target_month=target_month)
 
 
 async def delete_bank_by_name(deps: WorkflowDependencies, user_id: int, bank_name: str) -> None:
@@ -66,3 +84,10 @@ async def delete_bank_by_name(deps: WorkflowDependencies, user_id: int, bank_nam
         raise NotFoundError("errors.bank_not_found")
     bank = next(item for item in banks if item.bank_name == matched[0])
     await deps.delete_bank_use_case.execute(user_id=user_id, bank_id=bank.id)
+
+
+def _payload_month(command: UserCommand) -> str | None:
+    raw_month = command.payload.get("month")
+    if raw_month is None:
+        return None
+    return str(raw_month)

@@ -4,6 +4,7 @@ from app.application.presenters import workflow_screens
 from app.application.workflow import banks
 from app.application.workflow.models import Effect, UserCommand, WorkflowResult, WorkflowState
 from app.application.workflow.dependencies import WorkflowDependencies
+from app.domain.errors import ValidationError
 from app.domain.models import UserAccount
 
 
@@ -40,6 +41,12 @@ async def route_text(
             state=state,
             screen=workflow_screens.delete_category_result_screen(deleted_count, touched_banks),
         )
+    try:
+        deps.parse_manual_use_case.execute(text)
+    except ValidationError:
+        pass
+    else:
+        return UserCommand(name="submit_manual_text", payload={"text": text})
     return workflow_screens.result_with_screen(
         user=user,
         state=state,

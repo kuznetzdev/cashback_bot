@@ -1,6 +1,13 @@
+from types import SimpleNamespace
+
+import pytest
+
 from app.adapters.telegram.callbacks import decode_callback, encode_action
-from app.application.models import Action
+from app.adapters.telegram.router import _build_telegram_identity, _sync_user_only
+from app.application.auth.models import ExternalIdentityContext
+from app.application.workflow.models import Action
 from app.domain.errors import ValidationError
+from app.domain.models import UserAccount
 
 
 def test_encode_decode_nav_bank() -> None:
@@ -48,6 +55,7 @@ def test_all_core_screen_actions_have_callback_mapping() -> None:
     actions = [
         Action(command="open_home", label_key="buttons.home"),
         Action(command="open_add_bank", label_key="buttons.add_bank"),
+        Action(command="select_existing_bank", label_key="bank:T-Bank", payload={"id": 1}),
         Action(command="select_bank_preset", label_key="bank:T-Bank", payload={"index": 0}),
         Action(command="select_bank_other", label_key="buttons.other_bank"),
         Action(command="choose_input_method", label_key="buttons.input_photo", payload={"method": "photo"}),
@@ -69,6 +77,8 @@ def test_all_core_screen_actions_have_callback_mapping() -> None:
         Action(command="confirm_delete_bank", label_key="buttons.confirm_delete", payload={"id": 1}),
         Action(command="cancel_flow", label_key="buttons.cancel"),
         Action(command="add_item", label_key="buttons.add_item"),
+        Action(command="change_selected_bank", label_key="buttons.change_bank"),
+        Action(command="set_target_month", label_key="buttons.month_next", payload={"offset": 1}),
         Action(command="save_bank", label_key="buttons.save"),
         Action(command="open_help", label_key="buttons.help"),
         Action(command="open_history", label_key="buttons.history"),
@@ -82,3 +92,65 @@ def test_all_core_screen_actions_have_callback_mapping() -> None:
         callback_data = encode_action(action)
         command = decode_callback(callback_data)
         assert command.name == action.command
+
+
+def test_open_bank_callback_can_include_month_payload() -> None:
+    action = Action(command="open_bank", label_key="bank:T-Bank", payload={"id": 42, "month": "2026-04"})
+
+    callback_data = encode_action(action)
+    command = decode_callback(callback_data)
+
+    assert callback_data == "nav:bank:42:2026-04"
+    assert command.name == "open_bank"
+    assert command.payload == {"id": 42, "month": "2026-04"}
+
+
+def test_build_telegram_identity_returns_platform_neutral_context() -> None:
+    from_user = SimpleNamespace(id=42, username="tg_user", full_name="Telegram User")
+
+    identity = _build_telegram_identity(from_user)
+
+    assert identity == ExternalIdentityContext(
+        provider="telegram",
+        provider_user_id="42",
+        provider_username="tg_user",
+        provider_display_name="Telegram User",
+    )
+
+
+class _FakeFacade:
+    def __init__(self) -> None:
+        self.calls: list[tuple[ExternalIdentityContext, bool, str | None]] = []
+
+    async def authenticate_external_identity(
+        self,
+        identity: ExternalIdentityContext,
+        *,
+        create_user_if_missing: bool,
+        log_action: str | None = None,
+    ) -> UserAccount:
+        self.calls.append((identity, create_user_if_missing, log_action))
+        return UserAccount(id=1, display_name="Telegram User", language="ru", notifications_enabled=True)
+
+
+@pytest.mark.asyncio
+async def test_sync_user_only_uses_external_identity_authentication_path() -> None:
+    facade = _FakeFacade()
+    deps = SimpleNamespace(facade=facade)
+    event = SimpleNamespace(from_user=SimpleNamespace(id=42, username="tg_user", full_name="Telegram User"))
+
+    user = await _sync_user_only(deps, event, log_action="user_started")
+
+    assert user.id == 1
+    assert facade.calls == [
+        (
+            ExternalIdentityContext(
+                provider="telegram",
+                provider_user_id="42",
+                provider_username="tg_user",
+                provider_display_name="Telegram User",
+            ),
+            True,
+            "user_started",
+        )
+    ]

@@ -12,9 +12,12 @@ from app.adapters.postgres.models import (
     UserIdentityModel,
     UserLogModel,
     UserModel,
+    WorkflowStateModel,
     utcnow,
 )
-from app.domain.models import Bank, CashbackDraftItem, LocalCredentials, ReminderTarget, UserAccount, UserIdentity, UserLogEntry
+from app.application.months import current_month_key, normalize_month_key, sort_month_keys
+from app.application.workflow.models import WorkflowState
+from app.domain.models import Bank, CashbackDraftItem, DeliveryTarget, LocalCredentials, UserAccount, UserIdentity, UserLogEntry
 
 
 class PostgresUserRepository:
@@ -24,7 +27,6 @@ class PostgresUserRepository:
     async def create(self, *, display_name: str, default_language: str) -> UserAccount:
         model = UserModel(
             display_name=display_name.strip(),
-            full_name=display_name.strip(),
             language=default_language,
             notifications_enabled=True,
         )
@@ -128,18 +130,6 @@ class PostgresUserIdentityRepository:
             model.provider_display_name = provider_display_name
             model.updated_at = utcnow()
 
-        if provider == "telegram":
-            user_result = await self.session.execute(select(UserModel).where(UserModel.id == user_id))
-            user_model = user_result.scalar_one_or_none()
-            if user_model is not None:
-                try:
-                    user_model.telegram_user_id = int(provider_user_id)
-                except ValueError:
-                    user_model.telegram_user_id = None
-                user_model.username = provider_username
-                user_model.full_name = provider_display_name
-                user_model.updated_at = utcnow()
-
         await self.session.flush()
         return self._to_domain(model)
 
@@ -153,19 +143,11 @@ class PostgresUserIdentityRepository:
         model = result.scalar_one_or_none()
         if model is None:
             return False
-        if provider == "telegram":
-            user_result = await self.session.execute(select(UserModel).where(UserModel.id == user_id))
-            user_model = user_result.scalar_one_or_none()
-            if user_model is not None:
-                user_model.telegram_user_id = None
-                user_model.username = None
-                user_model.full_name = user_model.display_name
-                user_model.updated_at = utcnow()
         await self.session.delete(model)
         await self.session.flush()
         return True
 
-    async def list_reminder_targets(self, *, provider: str) -> list[ReminderTarget]:
+    async def list_delivery_targets(self, *, provider: str) -> list[DeliveryTarget]:
         result = await self.session.execute(
             select(UserIdentityModel, UserModel)
             .join(UserModel, UserModel.id == UserIdentityModel.user_id)
@@ -175,10 +157,10 @@ class PostgresUserIdentityRepository:
             )
             .order_by(UserIdentityModel.user_id.asc())
         )
-        targets: list[ReminderTarget] = []
+        targets: list[DeliveryTarget] = []
         for identity_model, user_model in result.all():
             targets.append(
-                ReminderTarget(
+                DeliveryTarget(
                     user_id=user_model.id,
                     provider=identity_model.provider,
                     destination=identity_model.provider_user_id,
@@ -308,10 +290,14 @@ class PostgresCashbackRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def list_for_bank(self, bank_id: int) -> list[CashbackDraftItem]:
+    async def list_for_bank(self, bank_id: int, target_month: str | None = None) -> list[CashbackDraftItem]:
+        month = normalize_month_key(target_month) if target_month is not None else current_month_key()
         result = await self.session.execute(
             select(CashbackItemModel)
-            .where(CashbackItemModel.bank_id == bank_id)
+            .where(
+                CashbackItemModel.bank_id == bank_id,
+                CashbackItemModel.target_month == month,
+            )
             .order_by(CashbackItemModel.percent.desc(), CashbackItemModel.normalized_category.asc())
         )
         return [
@@ -324,12 +310,19 @@ class PostgresCashbackRepository:
             for item in result.scalars().all()
         ]
 
-    async def replace_for_bank(self, bank_id: int, items: list[CashbackDraftItem]) -> None:
-        await self.session.execute(delete(CashbackItemModel).where(CashbackItemModel.bank_id == bank_id))
+    async def replace_for_bank(self, bank_id: int, target_month: str, items: list[CashbackDraftItem]) -> None:
+        month = normalize_month_key(target_month)
+        await self.session.execute(
+            delete(CashbackItemModel).where(
+                CashbackItemModel.bank_id == bank_id,
+                CashbackItemModel.target_month == month,
+            )
+        )
         for item in items:
             self.session.add(
                 CashbackItemModel(
                     bank_id=bank_id,
+                    target_month=month,
                     raw_category=item.raw_category,
                     normalized_category=item.normalized_category,
                     percent=item.percent,
@@ -337,6 +330,15 @@ class PostgresCashbackRepository:
                 )
             )
         await self.session.flush()
+
+    async def list_months_for_bank(self, bank_id: int) -> list[str]:
+        result = await self.session.execute(
+            select(CashbackItemModel.target_month)
+            .where(CashbackItemModel.bank_id == bank_id)
+            .distinct()
+            .order_by(CashbackItemModel.target_month.asc())
+        )
+        return sort_month_keys([str(month) for month in result.scalars().all()])
 
 
 class PostgresLogRepository:
@@ -373,3 +375,31 @@ class PostgresLogRepository:
             payload=model.payload_json,
             created_at=model.created_at,
         )
+
+
+class PostgresWorkflowStateRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def get_for_user(self, user_id: int) -> WorkflowState | None:
+        result = await self.session.execute(select(WorkflowStateModel).where(WorkflowStateModel.user_id == user_id))
+        model = result.scalar_one_or_none()
+        if model is None:
+            return None
+        return WorkflowState.from_dict(model.state_json)
+
+    async def save_for_user(self, user_id: int, state: WorkflowState) -> None:
+        result = await self.session.execute(select(WorkflowStateModel).where(WorkflowStateModel.user_id == user_id))
+        model = result.scalar_one_or_none()
+        serialized = state.to_dict()
+        if model is None:
+            model = WorkflowStateModel(user_id=user_id, state_json=serialized)
+            self.session.add(model)
+        else:
+            model.state_json = serialized
+            model.updated_at = utcnow()
+        await self.session.flush()
+
+    async def delete_for_user(self, user_id: int) -> None:
+        await self.session.execute(delete(WorkflowStateModel).where(WorkflowStateModel.user_id == user_id))
+        await self.session.flush()

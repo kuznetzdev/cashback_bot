@@ -12,6 +12,7 @@ from app.adapters.postgres.repositories import (
     PostgresLogRepository,
     PostgresUserIdentityRepository,
     PostgresUserRepository,
+    PostgresWorkflowStateRepository,
 )
 
 
@@ -25,6 +26,7 @@ class SqlAlchemyUnitOfWork(UnitOfWorkPort):
         self.banks: PostgresBankRepository
         self.cashback: PostgresCashbackRepository
         self.logs: PostgresLogRepository
+        self.workflow_states: PostgresWorkflowStateRepository
 
     async def __aenter__(self) -> "SqlAlchemyUnitOfWork":
         self.session = self._session_factory()
@@ -34,6 +36,7 @@ class SqlAlchemyUnitOfWork(UnitOfWorkPort):
         self.banks = PostgresBankRepository(self.session)
         self.cashback = PostgresCashbackRepository(self.session)
         self.logs = PostgresLogRepository(self.session)
+        self.workflow_states = PostgresWorkflowStateRepository(self.session)
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:

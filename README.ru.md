@@ -1,93 +1,104 @@
 # Cashback Analyzer
 
-Cashback Analyzer — это core-first платформа для анализа банковских cashback-предложений с двумя внешними адаптерами:
+Cashback Analyzer — это core-first платформа для анализа банковских cashback-категорий с двумя внешними адаптерами:
 
 - Telegram-бот на `aiogram 3`
 - веб-приложение на `FastAPI` + SSR mobile-first UI
 
-Продукт хранит и сравнивает актуальные cashback-предложения по картам и банкам пользователя. Он не ведет учет транзакций, реально начисленного cashback, расходов и бюджета.
+Продукт хранит и сравнивает актуальные cashback-предложения по банкам и картам пользователя. Он не ведёт учёт транзакций, начисленного cashback, расходов или бюджета.
 
 ## Карта документации
 
-- [Обзор продукта](C:\Users\Kuznetz\Desktop\proga\cashback_bot\docs\ru\PRODUCT_OVERVIEW.md)
-- [Архитектура](C:\Users\Kuznetz\Desktop\proga\cashback_bot\docs\ru\ARCHITECTURE.md)
-- [Разработка и запуск](C:\Users\Kuznetz\Desktop\proga\cashback_bot\docs\ru\DEVELOPMENT.md)
-- [Пользовательские сценарии](C:\Users\Kuznetz\Desktop\proga\cashback_bot\docs\ru\USER_FLOWS.md)
-- [Web user cases](C:\Users\Kuznetz\Desktop\proga\cashback_bot\docs\ru\WEB_USER_CASES.md)
+- [Англоязычный README](README.md)
+- [Обзор продукта](docs/ru/PRODUCT_OVERVIEW.md)
+- [Архитектура](docs/ru/ARCHITECTURE.md)
+- [Разработка и запуск](docs/ru/DEVELOPMENT.md)
+- [Пользовательские сценарии](docs/ru/USER_FLOWS.md)
+- [Web user cases](docs/ru/WEB_USER_CASES.md)
+- [Repository Integrity Audit (historical snapshot)](docs/audits/repository-integrity-audit.md)
 
-## Короткое описание
+## Краткое описание
 
-Проект — это кроссплатформенное веб-приложение для управления банковским cashback, которое помогает пользователю собирать данные по картам из разных банков, проверять и редактировать их, а затем получать понятные рекомендации, какой картой платить в конкретной категории, чтобы максимизировать выгоду.
+Проект — это кроссплатформенное приложение для управления банковским cashback. Оно помогает пользователю собрать данные по картам из разных банков, проверить и отредактировать их, а затем получить практическую рекомендацию, какой картой выгоднее платить в конкретной категории.
 
 ## Бизнес-цель
 
-Система нужна для того, чтобы пользователь быстро понимал, какой картой выгоднее платить в конкретной ситуации.
+Система нужна для того, чтобы пользователь быстро понимал, какой картой выгоднее платить в реальной жизненной ситуации.
 
-Это не бухгалтерский продукт и не менеджер личных финансов. Это decision-support продукт для оптимизации cashback:
+Это не бухгалтерский продукт. Это decision-support продукт для оптимизации cashback:
 
-- собрать предложения разных банков в одном месте
-- привести их к сопоставимой форме
+- собрать предложения разных банков
+- привести их к сопоставимой модели
 - дать пользователю проверить и исправить данные
 - выдать практическую рекомендацию по категории или сценарию покупки
 
-В бизнесовом виде это user-centric fintech utility product, который сокращает потери выгоды из-за фрагментации банковских предложений, упрощает работу с ежемесячно меняющимися cashback-категориями и превращает сложные банковские условия в быстрый, полезный и понятный пользовательский опыт на мобильных и десктопных устройствах.
+## Что система умеет
 
-## Что система умеет сейчас
+- Аутентифицирует Telegram identity через общий external-identity flow.
+- Поддерживает локальную web-регистрацию и вход.
+- Собирает cashback-категории со скриншотов через OCR.
+- Принимает скриншоты прямо с web home screen и направляет распознанные категории в attach-to-bank flow.
+- Поддерживает ручной ввод и template-based draft creation.
+- Нормализует категории по RU/EN синонимам.
+- Даёт редактировать draft и уже сохранённые банковские данные.
+- Хранит cashback-категории как month-aware snapshots для previous/current/next month.
+- Строит лидеров по категориям, глобальный рейтинг банков и best-bank ответы.
+- Хранит историю действий в `user_logs`.
+- Отправляет ежемесячные reminders пользователям с включёнными уведомлениями.
+- Запускает планировщик reminders на уровне application runtime, а не внутри Telegram polling lifecycle.
+- Запускает Telegram и web adapters независимо через feature flags.
 
-- синхронизирует пользователей через `/start` или Telegram Login
-- собирает cashback-категории со скриншотов через OCR
-- принимает ручной ввод и template draft
-- нормализует категории по RU/EN синонимам
-- позволяет редактировать draft и уже сохраненные банковские данные
-- строит лидеров по категориям и глобальный рейтинг банков
-- понимает текстовые запросы вида «где лучше рестораны»
-- хранит историю действий в `user_logs`
-- отправляет ежемесячные напоминания
-- запускает Telegram и web адаптеры независимо через feature flags
-
-## Текущий baseline и продуктовый vision
+## Текущий baseline и product vision
 
 Текущий baseline уже поддерживает:
 
 - OCR/manual/template ingestion
-- preview и редактирование
-- редактирование сохраненных банков
-- ranking и best-match lookup
+- прямую загрузку скриншота с web home screen
+- automatic attach-to-bank flow после OCR/manual parsing
+- month-aware cashback snapshots
+- draft preview и editing
+- редактирование сохранённых банков
+- category ranking и best-match lookup
 - settings, reminders, history
-- web и Telegram поверх общего application core
+- local web auth и Telegram identity linking
+- web и Telegram adapters поверх одного application core
 
-Более широкий vision включает будущие возможности:
+Следующий продуктовый слой может дополнительно включать:
 
-- метаданные карты
-- лимиты и сроки действия cashback
+- card-level metadata
+- cashback limits и validity windows
 - более сложную decision logic
-- месячные исторические срезы
-- более богатую десктопную аналитику и bulk-editing
-
-Эти возможности описаны как roadmap, а не как уже реализованный функционал.
+- richer desktop analytics и bulk editing
 
 ## Кратко об архитектуре
 
-Проект построен как hexagonal/core-first система:
+Проект построен как core-first система:
 
-- `app/domain`: чистые доменные модели, enums, ошибки, нормализация, ranking rules
-- `app/application`: workflow contracts, use cases, ports, facade
-- `app/adapters`: PostgreSQL, OCR, Telegram, web, scheduler, system clock
-- `app/bootstrap`: конфигурация, wiring, startup checks, migrations, runtime
+- `app/domain`: чистые доменные модели, ошибки, enums, normalization, parsing, ranking
+- `app/application`: auth use cases, business use cases, workflow contracts, workflow handlers, presenters, facade
+- `app/adapters`: PostgreSQL, OCR, auth adapters, Telegram, web, scheduler, system
+- `app/bootstrap`: configuration, dependency wiring, startup checks, migrations, runtime
 
-Транспортно-независимая точка входа в бизнес-логику:
+Transport-neutral workflow entrypoint:
 
 ```python
 handle_command(user, workflow_state, user_command) -> WorkflowResult
 ```
 
-И Telegram, и web переводят внешний ввод в `UserCommand`, а затем рендерят возвращенный `Screen`.
+Текущая структура workflow:
+
+- `app/application/workflow`: dispatcher, interrupt policy, draft flow, bank flow, navigation, text intents
+- `app/application/presenters`: `Screen` builders и formatting helpers
+
+Подробное описание — в [docs/ru/ARCHITECTURE.md](docs/ru/ARCHITECTURE.md).
 
 ## Структура репозитория
 
 ```text
 app/
   adapters/
+    auth_local/
+    auth_telegram/
     ocr_tesseract/
     postgres/
     scheduler/
@@ -95,10 +106,15 @@ app/
     telegram/
     web/
   application/
+    auth/
     contracts/
+    dto/
+    presenters/
     use_cases/
+    workflow/
   bootstrap/
   domain/
+  i18n/
   locales/
   main.py
 alembic/
@@ -123,15 +139,21 @@ python -m app.main
 docker compose up --build
 ```
 
+Чтобы добавить Telegram adapter и owner reminder delivery, запустите:
+
+```bash
+docker compose --profile telegram up --build
+```
+
 При старте приложение умеет:
 
 - создавать PostgreSQL-базу, если `AUTO_CREATE_DB=true`
-- применять миграции Alembic, если `AUTO_MIGRATE=true`
-- запускать Telegram и/или web адаптеры по feature flags
+- применять Alembic migrations, если `AUTO_MIGRATE=true`
+- по умолчанию запускать web adapter, а Telegram adapter поднимать только при включении compose profile `telegram`
 
 ## Основные переменные окружения
 
-Полный список есть в [.env.example](C:\Users\Kuznetz\Desktop\proga\cashback_bot\.env.example). Ключевые переменные:
+Полный список есть в [.env.example](.env.example). Ключевые переменные:
 
 - `BOT_TOKEN`
 - `TELEGRAM_BOT_USERNAME`
@@ -145,25 +167,41 @@ docker compose up --build
 - `MAX_FILE_SIZE`
 - `APP_ENABLE_TELEGRAM`
 - `APP_ENABLE_WEB`
+- `WEB_ENABLE_TELEGRAM_AUTH`
+- `REMINDER_DELIVERY_PROVIDER`
 - `WEB_BASE_URL`
 - `WEB_SESSION_SECRET`
 
+Важная оговорка:
+
+- code defaults и `.env.example` теперь согласованы вокруг web-first local posture:
+  - `APP_ENABLE_TELEGRAM=false`
+  - `APP_ENABLE_WEB=true`
+  - `WEB_ENABLE_TELEGRAM_AUTH=false`
+  - `REMINDER_DELIVERY_PROVIDER=`
+- `BOT_TOKEN` нужен только когда включён Telegram adapter, web Telegram auth или Telegram reminder delivery
+- `TELEGRAM_BOT_USERNAME` нужен только для web Telegram auth
+
 ## Режимы запуска
 
-- только Telegram: `APP_ENABLE_TELEGRAM=true`, `APP_ENABLE_WEB=false`
-- только web: `APP_ENABLE_TELEGRAM=false`, `APP_ENABLE_WEB=true`
-- оба адаптера: `APP_ENABLE_TELEGRAM=true`, `APP_ENABLE_WEB=true`
+- локальный web-first по умолчанию: `APP_ENABLE_TELEGRAM=false`, `APP_ENABLE_WEB=true`, `WEB_ENABLE_TELEGRAM_AUTH=false`, `REMINDER_DELIVERY_PROVIDER=`
+- web с Telegram login/link: `APP_ENABLE_TELEGRAM=false`, `APP_ENABLE_WEB=true`, `WEB_ENABLE_TELEGRAM_AUTH=true`, `REMINDER_DELIVERY_PROVIDER=`
+- только Telegram: `APP_ENABLE_TELEGRAM=true`, `APP_ENABLE_WEB=false`, `REMINDER_DELIVERY_PROVIDER=telegram`
+- single-process hybrid: `APP_ENABLE_TELEGRAM=true`, `APP_ENABLE_WEB=true`, `WEB_ENABLE_TELEGRAM_AUTH=true`, `REMINDER_DELIVERY_PROVIDER=telegram`
 
 Один и тот же application core обслуживает все режимы.
 
 ## Краткий user journey
 
 1. Пользователь входит в продукт.
-2. Добавляет или обновляет cashback-предложение по банку/карте.
-3. Проверяет OCR/manual parsing на preview.
-4. Сохраняет актуальные данные.
-5. Позже спрашивает «чем платить в этой категории?».
-6. Использует ranking output вместо ручного сравнения нескольких банковских приложений.
+2. Сразу отправляет скриншот или выбирает manual/template input.
+3. Подтверждает распознанные категории и привязывает их к банку.
+4. Выбирает previous/current/next month.
+5. Сохраняет активный snapshot предложения.
+6. Позже спрашивает, какая карта лучше для категории.
+7. Использует ranking output вместо ручного сравнения нескольких банковских приложений.
+
+Подробная карта flow — в [docs/ru/USER_FLOWS.md](docs/ru/USER_FLOWS.md).
 
 ## Проверки
 
@@ -171,8 +209,19 @@ docker compose up --build
 
 ```bash
 pytest -q
-python -m compileall app
+python -m compileall app tests
 docker compose config -q
 ```
 
-Текущий staged baseline проходит эти проверки.
+## Текущее состояние
+
+Текущее архитектурное состояние:
+
+- platform identity model активен
+- local web auth активен
+- Telegram — secondary external identity и delivery adapter
+- workflow decomposition завершён для текущей фазы
+- presentation helpers вынесены из workflow orchestration
+- reminder scheduler принадлежит runtime, а не Telegram polling path
+
+Residual technical debt перечислен в [docs/audits/repository-integrity-audit.md](docs/audits/repository-integrity-audit.md) как исторический аудит, а не как источник истины.

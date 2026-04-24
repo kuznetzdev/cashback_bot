@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from app.application.months import current_month_key
 from app.application.contracts.ports import UnitOfWorkPort
 from app.domain.models import BankScore, CategoryLeader
 from app.domain.services.ranking import RankingEntry, RankingService
@@ -22,10 +23,11 @@ class GetRankingUseCase:
 
     async def _entries_for_user(self, user_id: int) -> list[RankingEntry]:
         entries: list[RankingEntry] = []
+        target_month = current_month_key()
         async with self.uow_factory() as uow:
             banks = await uow.banks.list_for_user(user_id)
             for bank in banks:
-                items = await uow.cashback.list_for_bank(bank.id)
+                items = await uow.cashback.list_for_bank(bank.id, target_month)
                 for item in items:
                     entries.append(
                         RankingEntry(

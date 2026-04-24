@@ -1,39 +1,71 @@
 {% extends "base.html" %}
 {% block content %}
 <main class="landing-shell">
-  <section class="landing-card">
-    <h1>{{ title }}</h1>
-    <p>{{ subtitle }}</p>
-    {% if error_message %}
-      <div class="toast toast-error" role="alert">{{ error_message }}</div>
-    {% endif %}
-    <section class="auth-grid">
-      <form method="post" action="/auth/login" class="auth-form">
-        <h2>Login</h2>
-        <input type="text" name="username" placeholder="Username" autocomplete="username" required>
-        <input type="password" name="password" placeholder="Password" autocomplete="current-password" required>
-        <button class="btn btn-primary" type="submit">Login</button>
-      </form>
+  <section class="landing-hero">
+    <div class="landing-story">
+      <p class="hero-kicker">{{ landing_eyebrow }}</p>
+      <h1>{{ title }}</h1>
+      <p class="landing-subtitle">{{ subtitle }}</p>
 
-      <form method="post" action="/auth/register" class="auth-form">
-        <h2>Register</h2>
-        <input type="text" name="display_name" placeholder="Display name" autocomplete="name">
-        <input type="text" name="username" placeholder="Username" autocomplete="username" required>
-        <input type="email" name="email" placeholder="Email (optional)" autocomplete="email">
-        <input type="password" name="password" placeholder="Password" autocomplete="new-password" required>
-        <button class="btn btn-secondary" type="submit">Create account</button>
-      </form>
-    </section>
-    {% if telegram_enabled %}
-    <div class="telegram-login-wrap">
-      <script async src="https://telegram.org/js/telegram-widget.js?22"
-              data-telegram-login="{{ bot_username }}"
-              data-size="large"
-              data-radius="12"
-              data-auth-url="{{ auth_url }}"
-              data-request-access="write"></script>
+      <ul class="landing-points">
+        {% for point in landing_points %}
+        <li>{{ point }}</li>
+        {% endfor %}
+      </ul>
+
+      <section class="rail-card rail-card-soft">
+        <div class="panel-heading">
+          <h2>{{ landing_steps_title }}</h2>
+        </div>
+        <ol class="step-list">
+          {% for step in landing_steps %}
+          <li>{{ step }}</li>
+          {% endfor %}
+        </ol>
+      </section>
     </div>
-    {% endif %}
+
+    <div class="landing-auth-stack">
+      {% if error_message %}
+      <div class="toast toast-error" role="alert">{{ error_message }}</div>
+      {% endif %}
+
+      <section class="auth-card">
+        <form method="post" action="/auth/login" class="auth-form">
+          <h2>{{ login_title }}</h2>
+          <input type="text" name="username" placeholder="{{ username_placeholder }}" autocomplete="username" required>
+          <input type="password" name="password" placeholder="{{ password_placeholder }}" autocomplete="current-password" required>
+          <button class="btn btn-primary" type="submit">{{ login_button_label }}</button>
+        </form>
+      </section>
+
+      <section class="auth-card">
+        <form method="post" action="/auth/register" class="auth-form">
+          <h2>{{ register_title }}</h2>
+          <input type="text" name="display_name" placeholder="{{ display_name_placeholder }}" autocomplete="name">
+          <input type="text" name="username" placeholder="{{ username_placeholder }}" autocomplete="username" required>
+          <input type="email" name="email" placeholder="{{ email_placeholder }}" autocomplete="email">
+          <input type="password" name="password" placeholder="{{ password_placeholder }}" autocomplete="new-password" required>
+          <button class="btn btn-secondary" type="submit">{{ create_account_label }}</button>
+        </form>
+      </section>
+
+      {% if telegram_enabled %}
+      <section class="auth-card auth-card-telegram">
+        <div class="panel-heading">
+          <h2>Telegram</h2>
+        </div>
+        <div class="telegram-login-wrap">
+          <script async src="https://telegram.org/js/telegram-widget.js?22"
+                  data-telegram-login="{{ bot_username }}"
+                  data-size="large"
+                  data-radius="12"
+                  data-auth-url="{{ auth_url }}"
+                  data-request-access="write"></script>
+        </div>
+      </section>
+      {% endif %}
+    </div>
   </section>
 </main>
 {% endblock %}

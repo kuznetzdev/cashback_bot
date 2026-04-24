@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 
 import pytest
 
+from app.application.months import current_month_key, sort_month_keys
 from app.application.contracts.ports import UnitOfWorkPort
 from app.application.dto.media import ImageUpload
-from app.domain.models import Bank, CashbackDraftItem, LocalCredentials, ReminderTarget, UserAccount, UserIdentity, UserLogEntry
+from app.application.workflow.models import WorkflowState
+from app.domain.models import Bank, CashbackDraftItem, DeliveryTarget, LocalCredentials, UserAccount, UserIdentity, UserLogEntry
 
 
 @dataclass(slots=True)
@@ -26,8 +29,9 @@ class InMemoryStore:
     credentials_by_username: dict[str, int] = field(default_factory=dict)
     credentials_by_email: dict[str, int] = field(default_factory=dict)
     banks: dict[int, Bank] = field(default_factory=dict)
-    bank_items: dict[int, list[CashbackDraftItem]] = field(default_factory=dict)
+    bank_items: dict[int, dict[str, list[CashbackDraftItem]]] = field(default_factory=dict)
     logs: list[UserLogEntry] = field(default_factory=list)
+    workflow_states: dict[int, dict[str, object]] = field(default_factory=dict)
 
 
 class InMemoryUsersRepo:
@@ -135,8 +139,8 @@ class InMemoryIdentitiesRepo:
         self.store.identities.pop(identity.id, None)
         return True
 
-    async def list_reminder_targets(self, *, provider: str) -> list[ReminderTarget]:
-        targets: list[ReminderTarget] = []
+    async def list_delivery_targets(self, *, provider: str) -> list[DeliveryTarget]:
+        targets: list[DeliveryTarget] = []
         for identity in self.store.identities.values():
             if identity.provider != provider:
                 continue
@@ -144,7 +148,7 @@ class InMemoryIdentitiesRepo:
             if user is None or not user.notifications_enabled:
                 continue
             targets.append(
-                ReminderTarget(
+                DeliveryTarget(
                     user_id=user.id,
                     provider=identity.provider,
                     destination=identity.provider_user_id,
@@ -242,11 +246,18 @@ class InMemoryCashbackRepo:
     def __init__(self, store: InMemoryStore) -> None:
         self.store = store
 
-    async def list_for_bank(self, bank_id: int) -> list[CashbackDraftItem]:
-        return list(self.store.bank_items.get(bank_id, []))
+    async def list_for_bank(self, bank_id: int, target_month: str | None = None) -> list[CashbackDraftItem]:
+        month = target_month or current_month_key()
+        bank_months = self.store.bank_items.get(bank_id, {})
+        return list(bank_months.get(month, []))
 
-    async def replace_for_bank(self, bank_id: int, items: list[CashbackDraftItem]) -> None:
-        self.store.bank_items[bank_id] = list(items)
+    async def replace_for_bank(self, bank_id: int, target_month: str, items: list[CashbackDraftItem]) -> None:
+        bank_months = self.store.bank_items.setdefault(bank_id, {})
+        bank_months[target_month] = list(items)
+
+    async def list_months_for_bank(self, bank_id: int) -> list[str]:
+        bank_months = self.store.bank_items.get(bank_id, {})
+        return sort_month_keys(list(bank_months.keys()))
 
 
 class InMemoryLogsRepo:
@@ -276,6 +287,23 @@ class InMemoryLogsRepo:
         ]
 
 
+class InMemoryWorkflowStatesRepo:
+    def __init__(self, store: InMemoryStore) -> None:
+        self.store = store
+
+    async def get_for_user(self, user_id: int) -> WorkflowState | None:
+        raw = self.store.workflow_states.get(user_id)
+        if raw is None:
+            return None
+        return WorkflowState.from_dict(deepcopy(raw))
+
+    async def save_for_user(self, user_id: int, state: WorkflowState) -> None:
+        self.store.workflow_states[user_id] = deepcopy(state.to_dict())
+
+    async def delete_for_user(self, user_id: int) -> None:
+        self.store.workflow_states.pop(user_id, None)
+
+
 class InMemoryUnitOfWork(UnitOfWorkPort):
     def __init__(self, store: InMemoryStore) -> None:
         self.users = InMemoryUsersRepo(store)
@@ -284,6 +312,7 @@ class InMemoryUnitOfWork(UnitOfWorkPort):
         self.banks = InMemoryBanksRepo(store)
         self.cashback = InMemoryCashbackRepo(store)
         self.logs = InMemoryLogsRepo(store)
+        self.workflow_states = InMemoryWorkflowStatesRepo(store)
 
     async def __aenter__(self) -> "InMemoryUnitOfWork":
         return self

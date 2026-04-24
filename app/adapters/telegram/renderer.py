@@ -13,7 +13,7 @@ from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt,
 
 from app.adapters.telegram.callbacks import encode_action
 from app.adapters.telegram.state import load_last_screen_message_id, save_last_screen_message_id
-from app.application.models import Screen
+from app.application.workflow.models import Screen
 from app.i18n.localizer import Localizer
 
 logger = logging.getLogger(__name__)
@@ -32,13 +32,19 @@ class TelegramScreenRenderer:
         keyboard = self._build_keyboard(screen, language)
 
         previous_screen_id = await load_last_screen_message_id(state)
-        new_message_id = await self._upsert_screen_message(
-            bot=bot,
-            chat_id=chat_id,
-            previous_message_id=previous_screen_id,
-            text=text,
-            markup=keyboard,
-        )
+        if isinstance(event, Message):
+            new_message = await self._send_message(bot=bot, chat_id=chat_id, text=text, markup=keyboard)
+            new_message_id = new_message.message_id
+            if previous_screen_id is not None and previous_screen_id != new_message_id:
+                await self._safe_delete_message(bot, chat_id, previous_screen_id)
+        else:
+            new_message_id = await self._upsert_screen_message(
+                bot=bot,
+                chat_id=chat_id,
+                previous_message_id=previous_screen_id,
+                text=text,
+                markup=keyboard,
+            )
         await save_last_screen_message_id(state, new_message_id)
 
         if isinstance(event, CallbackQuery):

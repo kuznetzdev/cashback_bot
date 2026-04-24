@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from app.application.models import UserCommand, UserContext, WorkflowState
+from app.application.auth.models import ExternalIdentityContext
+from app.application.auth.use_cases import AuthenticateExternalIdentityUseCase
+from app.application.dto.media import ImageUpload
+from app.application.workflow.models import UserCommand, WorkflowState
 from app.application.use_cases.handle_command import HandleCommandUseCase
-from app.application.use_cases.sync_user import SyncTelegramUserUseCase
+from app.application.months import current_month_key, shift_month_key
 from app.domain.services.categories import CategoryService
 from app.domain.services.parsing import ParserService
 from app.domain.services.ranking import RankingService
@@ -12,7 +15,7 @@ async def _build_use_cases(uow_factory, dummy_ocr):
     categories = CategoryService()
     parser = ParserService(categories)
     ranking = RankingService(categories)
-    sync = SyncTelegramUserUseCase(uow_factory, default_language="ru")
+    authenticate_external_identity = AuthenticateExternalIdentityUseCase(uow_factory, default_language="ru")
     handle = HandleCommandUseCase(
         uow_factory=uow_factory,
         parser=parser,
@@ -20,12 +23,18 @@ async def _build_use_cases(uow_factory, dummy_ocr):
         ranking=ranking,
         ocr=dummy_ocr,
     )
-    return sync, handle
+    return authenticate_external_identity, handle
 
 
-async def _create_user(sync_use_case: SyncTelegramUserUseCase):
-    return await sync_use_case.execute(
-        UserContext(external_user_id=1001, username="demo", full_name="Demo User"),
+async def _create_user(authenticate_external_identity_use_case: AuthenticateExternalIdentityUseCase):
+    return await authenticate_external_identity_use_case.execute(
+        ExternalIdentityContext(
+            provider="telegram",
+            provider_user_id="1001",
+            provider_username="demo",
+            provider_display_name="Demo User",
+        ),
+        create_user_if_missing=True,
         log_action="user_started",
     )
 
@@ -66,7 +75,7 @@ async def test_edit_saved_bank_replaces_item_set_atomically(uow_factory, dummy_o
         UserCommand(name="submit_manual_text", payload={"text": "Fuel 5%"}),
     )
     result = await handle.execute(user, result.state, UserCommand(name="save_bank"))
-    bank_id = result.state.selected_bank_id
+    bank_id = next(iter(store.banks))
     assert bank_id is not None
 
     result = await handle.execute(user, result.state, UserCommand(name="edit_bank", payload={"id": bank_id}))
@@ -76,7 +85,7 @@ async def test_edit_saved_bank_replaces_item_set_atomically(uow_factory, dummy_o
     result = await handle.execute(user, result.state, UserCommand(name="submit_item_percent", payload={"text": "3"}))
     result = await handle.execute(user, result.state, UserCommand(name="save_bank"))
 
-    saved_items = store.bank_items[bank_id]
+    saved_items = store.bank_items[bank_id][current_month_key()]
     assert len(saved_items) == 1
     assert saved_items[0].normalized_category == "pharmacy"
 
@@ -184,3 +193,81 @@ async def test_interrupt_save_and_go_persists_bank(uow_factory, dummy_ocr, store
 
     assert saved.screen.id == "my_banks"
     assert len(store.banks) == 1
+
+
+async def test_uploaded_image_auto_selects_single_existing_bank_and_opens_preview(uow_factory, dummy_ocr, store) -> None:
+    sync, handle = await _build_use_cases(uow_factory, dummy_ocr)
+    user = await _create_user(sync)
+
+    initial = await handle.execute(
+        user,
+        WorkflowState(selected_bank_name="T-Bank"),
+        UserCommand(name="submit_manual_text", payload={"text": "Fuel 5%"}),
+    )
+    saved = await handle.execute(user, initial.state, UserCommand(name="save_bank"))
+    saved_bank_id = next(iter(store.banks))
+
+    dummy_ocr.value = "Taxi 3%\nRestaurants 7%"
+    result = await handle.execute(
+        user,
+        WorkflowState(),
+        UserCommand(
+            name="submit_uploaded_image",
+            payload={
+                "upload": ImageUpload(
+                    content=b"fake-image",
+                    filename="screen.png",
+                    content_type="image/png",
+                )
+            },
+        ),
+    )
+
+    assert result.screen.id == "preview"
+    assert result.state.selected_bank_id == saved_bank_id
+    assert result.state.selected_bank_name == "T-Bank"
+    assert [item.normalized_category for item in result.state.draft_items] == ["restaurants", "taxi"]
+
+
+async def test_month_snapshots_are_saved_separately_for_same_bank(uow_factory, dummy_ocr, store) -> None:
+    sync, handle = await _build_use_cases(uow_factory, dummy_ocr)
+    user = await _create_user(sync)
+    current_month = current_month_key()
+    next_month = shift_month_key(current_month, 1)
+
+    first_result = await handle.execute(
+        user,
+        WorkflowState(selected_bank_name="T-Bank", target_month=current_month),
+        UserCommand(name="submit_manual_text", payload={"text": "Fuel 5%"}),
+    )
+    first_saved = await handle.execute(user, first_result.state, UserCommand(name="save_bank"))
+    bank_id = next(iter(store.banks))
+    assert bank_id is not None
+
+    second_result = await handle.execute(
+        user,
+        WorkflowState(selected_bank_id=bank_id, selected_bank_name="T-Bank", target_month=next_month),
+        UserCommand(name="submit_manual_text", payload={"text": "Restaurants 7%"}),
+    )
+    await handle.execute(user, second_result.state, UserCommand(name="save_bank"))
+
+    assert [item.normalized_category for item in store.bank_items[bank_id][current_month]] == ["fuel"]
+    assert [item.normalized_category for item in store.bank_items[bank_id][next_month]] == ["restaurants"]
+
+
+async def test_save_bank_clears_active_draft_state(uow_factory, dummy_ocr) -> None:
+    sync, handle = await _build_use_cases(uow_factory, dummy_ocr)
+    user = await _create_user(sync)
+
+    result = await handle.execute(user, WorkflowState(), UserCommand(name="open_add_bank"))
+    result = await handle.execute(user, result.state, UserCommand(name="select_bank_preset", payload={"index": 0}))
+    result = await handle.execute(user, result.state, UserCommand(name="choose_input_method", payload={"method": "manual"}))
+    result = await handle.execute(user, result.state, UserCommand(name="submit_manual_text", payload={"text": "Fuel 5%"}))
+
+    saved = await handle.execute(user, result.state, UserCommand(name="save_bank"))
+
+    assert saved.screen.id == "bank_details"
+    assert saved.state == WorkflowState()
+
+    home = await handle.execute(user, saved.state, UserCommand(name="open_home"))
+    assert home.screen.id == "home"

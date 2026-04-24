@@ -2,10 +2,14 @@
 {% block content %}
 <div class="app-shell">
   <header class="app-header">
-    <div class="brand">
-      <strong>{{ app_title }}</strong>
-      <small>{{ user_name }}</small>
+    <div class="brand-block">
+      <p class="brand-kicker">{{ flow_summary.next_step_label }}</p>
+      <div class="brand-copy">
+        <strong>{{ app_title }}</strong>
+        <small>{{ user_name }}</small>
+      </div>
     </div>
+
     <div class="header-actions">
       {% if telegram_enabled %}
       <div class="linked-accounts">
@@ -48,61 +52,135 @@
   </section>
   {% endif %}
 
-  <main class="screen-wrap" data-screen="{{ screen_id }}" data-layout="{{ screen_layout_hint }}">
-    <section class="screen-card">
-      <h1>{{ screen_title }}</h1>
-      <div class="screen-body">{{ screen_body|replace('\n', '<br>')|safe }}</div>
-    </section>
+  <main class="workspace" data-screen="{{ screen_id }}" data-layout="{{ screen_layout_hint }}">
+    <section class="main-stage">
+      <article class="hero-card">
+        <div class="hero-copy">
+          <p class="hero-kicker">{{ flow_summary.next_step_value }}</p>
+          <h1>{{ screen_title }}</h1>
+          <div class="screen-body">{{ screen_body|replace('\n', '<br>')|safe }}</div>
+        </div>
 
-    {% if input_panel %}
-    <section class="input-panel {% if screen_id == 'edit_item' %}input-panel-sheet{% endif %}">
-      <h2>{{ input_panel.title }}</h2>
-      {% if input_panel.kind == "textarea" %}
-      <form method="post" action="/app/input" data-loading-form>
-        <textarea name="text" rows="6" placeholder="{{ input_panel.placeholder }}" required></textarea>
-        <button class="btn btn-primary btn-block" type="submit">{{ input_panel.submit_label }}</button>
-      </form>
-      {% elif input_panel.kind == "file" %}
-      <form method="post" action="/app/upload" enctype="multipart/form-data" data-loading-form>
-        <label class="file-field">
-          <input type="file" name="file" accept="{{ input_panel.accept }}" required data-upload-input>
-          <span>{{ input_panel.hint }}</span>
-        </label>
-        <img alt="Preview" class="upload-preview" data-upload-preview hidden>
-        <button class="btn btn-primary btn-block" type="submit">{{ input_panel.submit_label }}</button>
-      </form>
-      {% else %}
-      <form method="post" action="/app/input" data-loading-form>
-        <input type="text"
-               name="text"
-               placeholder="{{ input_panel.placeholder }}"
-               inputmode="{{ input_panel.inputmode }}"
-               required>
-        <button class="btn btn-primary btn-block" type="submit">{{ input_panel.submit_label }}</button>
-      </form>
-      {% endif %}
-    </section>
-    {% endif %}
+        <dl class="summary-grid" data-flow-summary="true">
+          <div class="summary-item">
+            <dt>{{ flow_summary.bank_label }}</dt>
+            <dd>{{ flow_summary.bank_value }}</dd>
+          </div>
+          <div class="summary-item">
+            <dt>{{ flow_summary.month_label }}</dt>
+            <dd>{{ flow_summary.month_value }}</dd>
+          </div>
+          <div class="summary-item">
+            <dt>{{ flow_summary.items_label }}</dt>
+            <dd>{{ flow_summary.items_value }}</dd>
+          </div>
+          <div class="summary-item">
+            <dt>{{ flow_summary.telegram_label }}</dt>
+            <dd>{{ flow_summary.telegram_value }}</dd>
+          </div>
+        </dl>
+      </article>
 
-    <section class="actions-wrap">
-      {% if actions %}
-        {% for action in actions %}
-        <form method="post" action="/app/action" class="action-form" data-loading-form>
-          <input type="hidden" name="command" value="{{ action.command }}">
-          <input type="hidden" name="payload_json" value='{{ action.payload_json }}'>
-          <button type="submit" class="btn btn-{{ action.variant }} btn-block">{{ action.label }}</button>
+      {% if input_panel %}
+      <section class="composer-card {% if input_panel.kind == 'file' %}composer-card-accent{% endif %}">
+        <div class="panel-heading">
+          <h2>{{ input_panel.title }}</h2>
+          {% if input_panel.supporting_text %}
+          <p>{{ input_panel.supporting_text }}</p>
+          {% endif %}
+        </div>
+
+        {% if input_panel.kind == "textarea" %}
+        <form method="post" action="/app/input" class="composer-form" data-loading-form>
+          <textarea name="text" rows="7" placeholder="{{ input_panel.placeholder }}" required></textarea>
+          <button class="btn btn-primary btn-block" type="submit">{{ input_panel.submit_label }}</button>
         </form>
-        {% endfor %}
+        {% elif input_panel.kind == "file" %}
+        <form method="post" action="/app/upload" enctype="multipart/form-data" class="composer-form" data-loading-form>
+          <label class="file-field">
+            <input type="file" name="file" accept="{{ input_panel.accept }}" required data-upload-input>
+            <span>{{ input_panel.hint }}</span>
+          </label>
+          <p class="file-meta" data-upload-filename hidden>{{ input_panel.filename_label }}</p>
+          <img alt="Preview" class="upload-preview" data-upload-preview hidden>
+          <button class="btn btn-primary btn-block" type="submit">{{ input_panel.submit_label }}</button>
+        </form>
+        {% else %}
+        <form method="post" action="/app/input" class="composer-form" data-loading-form>
+          <input type="text"
+                 name="text"
+                 placeholder="{{ input_panel.placeholder }}"
+                 inputmode="{{ input_panel.inputmode }}"
+                 required>
+          <button class="btn btn-primary btn-block" type="submit">{{ input_panel.submit_label }}</button>
+        </form>
+        {% endif %}
+      </section>
       {% endif %}
+
+      {% for section in action_sections %}
+      <section class="action-panel action-panel-{{ section.id }}" data-action-section="{{ section.id }}">
+        <div class="panel-heading">
+          <h2>{{ section.title }}</h2>
+        </div>
+        <div class="actions-grid actions-grid-{{ section.id }}">
+          {% for action in section.actions %}
+          <form method="post" action="/app/action" class="action-form" data-loading-form>
+            <input type="hidden" name="command" value="{{ action.command }}">
+            <input type="hidden" name="payload_json" value='{{ action.payload_json }}'>
+            <button type="submit" class="btn btn-{{ action.variant }} btn-block">{{ action.label }}</button>
+          </form>
+          {% endfor %}
+        </div>
+      </section>
+      {% endfor %}
 
       {% if has_more_actions %}
       <a class="btn btn-ghost btn-block" href="/app?actions_limit={{ next_actions_limit }}">{{ show_more_label }}</a>
       {% endif %}
     </section>
+
+    <aside class="support-rail">
+      <section class="rail-card">
+        <div class="panel-heading">
+          <h2>{{ flow_summary.title }}</h2>
+          <p>{{ flow_summary.next_step_value }}</p>
+        </div>
+        <dl class="rail-summary-list">
+          <div>
+            <dt>{{ flow_summary.bank_label }}</dt>
+            <dd>{{ flow_summary.bank_value }}</dd>
+          </div>
+          <div>
+            <dt>{{ flow_summary.month_label }}</dt>
+            <dd>{{ flow_summary.month_value }}</dd>
+          </div>
+          <div>
+            <dt>{{ flow_summary.items_label }}</dt>
+            <dd>{{ flow_summary.items_value }}</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="rail-card">
+        <div class="panel-heading">
+          <h2>{{ workflow_steps_title }}</h2>
+          <p>{{ flow_summary.next_step_label }}</p>
+        </div>
+        <ol class="step-list">
+          {% for step in workflow_steps %}
+          <li>{{ step }}</li>
+          {% endfor %}
+        </ol>
+      </section>
+    </aside>
   </main>
 
   <div class="loading-overlay" data-loading-overlay hidden>
-    <span>{{ processing_label }}</span>
+    <div class="loading-card">
+      <span class="loading-dot"></span>
+      <strong>{{ processing_label }}</strong>
+    </div>
   </div>
 </div>
 {% endblock %}

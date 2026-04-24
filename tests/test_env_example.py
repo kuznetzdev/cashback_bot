@@ -32,6 +32,8 @@ REQUIRED_ENV_KEYS = {
     "MIGRATION_RETRY_DELAY",
     "APP_ENABLE_TELEGRAM",
     "APP_ENABLE_WEB",
+    "WEB_ENABLE_TELEGRAM_AUTH",
+    "REMINDER_DELIVERY_PROVIDER",
     "WEB_HOST",
     "WEB_PORT",
     "WEB_BASE_URL",
@@ -54,3 +56,20 @@ def test_env_example_contains_required_keys() -> None:
     }
     missing = sorted(REQUIRED_ENV_KEYS - keys)
     assert not missing, f".env.example missing required keys: {missing}"
+
+
+def test_env_example_defaults_to_local_web_only_posture() -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    env_path = project_root / ".env.example"
+    content = env_path.read_text(encoding="utf-8")
+    values = {
+        line.split("=", maxsplit=1)[0].strip(): line.split("=", maxsplit=1)[1].strip()
+        for line in content.splitlines()
+        if line.strip() and not line.strip().startswith("#") and "=" in line
+    }
+
+    assert values["APP_ENABLE_TELEGRAM"] == "false"
+    assert values["APP_ENABLE_WEB"] == "true"
+    assert values["WEB_ENABLE_TELEGRAM_AUTH"] == "false"
+    assert values["REMINDER_DELIVERY_PROVIDER"] == ""
+    assert values["WEB_SESSION_SECRET"] == "dev-session-secret-not-for-production"

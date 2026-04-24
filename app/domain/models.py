@@ -12,11 +12,6 @@ class UserAccount:
     language: str
     notifications_enabled: bool
 
-
-# Temporary compatibility alias while the application transitions to UserAccount naming.
-UserProfile = UserAccount
-
-
 @dataclass(slots=True)
 class UserIdentity:
     id: int
@@ -37,7 +32,7 @@ class LocalCredentials:
 
 
 @dataclass(slots=True)
-class ReminderTarget:
+class DeliveryTarget:
     user_id: int
     provider: str
     destination: str
@@ -63,6 +58,8 @@ class Bank:
 class BankAggregate:
     bank: Bank
     items: list[CashbackDraftItem] = field(default_factory=list)
+    target_month: str | None = None
+    available_months: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)

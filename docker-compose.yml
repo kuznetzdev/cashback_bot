@@ -18,6 +18,8 @@ services:
       start_period: 5s
 
   bot:
+    profiles:
+      - telegram
     build:
       context: .
     restart: unless-stopped
@@ -46,8 +48,10 @@ services:
       DB_POOL_TIMEOUT: ${DB_POOL_TIMEOUT:-30}
       DB_POOL_RECYCLE: ${DB_POOL_RECYCLE:-300}
       TELEGRAM_RETRY_DELAY: ${TELEGRAM_RETRY_DELAY:-5.0}
-      APP_ENABLE_TELEGRAM: ${APP_ENABLE_TELEGRAM:-true}
+      APP_ENABLE_TELEGRAM: true
       APP_ENABLE_WEB: false
+      WEB_ENABLE_TELEGRAM_AUTH: false
+      REMINDER_DELIVERY_PROVIDER: telegram
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       WEB_HOST: 0.0.0.0
       WEB_PORT: 8080
@@ -91,10 +95,12 @@ services:
       TELEGRAM_RETRY_DELAY: ${TELEGRAM_RETRY_DELAY:-5.0}
       APP_ENABLE_TELEGRAM: false
       APP_ENABLE_WEB: true
+      WEB_ENABLE_TELEGRAM_AUTH: ${WEB_ENABLE_TELEGRAM_AUTH:-false}
+      REMINDER_DELIVERY_PROVIDER: ""
       WEB_HOST: 0.0.0.0
       WEB_PORT: 8080
       WEB_BASE_URL: ${WEB_BASE_URL:-http://localhost:8080}
-      WEB_SESSION_SECRET: ${WEB_SESSION_SECRET:-change-me-session-secret}
+      WEB_SESSION_SECRET: ${WEB_SESSION_SECRET:-dev-session-secret-not-for-production}
       WEB_SECURE_COOKIES: ${WEB_SECURE_COOKIES:-false}
       WEB_MAX_UPLOAD_SIZE: ${WEB_MAX_UPLOAD_SIZE:-5242880}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}

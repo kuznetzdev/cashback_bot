@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from app.application.months import normalize_month_key
 from app.application.contracts.ports import UnitOfWorkPort
 from app.domain.errors import ValidationError
 from app.domain.models import CashbackDraftItem
@@ -17,6 +18,7 @@ class SaveBankDraftUseCase:
         user_id: int,
         bank_id: int | None,
         bank_name: str,
+        target_month: str,
         items: list[CashbackDraftItem],
     ) -> int:
         if not bank_name.strip():
@@ -25,6 +27,7 @@ class SaveBankDraftUseCase:
             raise ValidationError("errors.no_items_to_save")
         if any(item.percent <= 0 for item in items):
             raise ValidationError("errors.zero_percent_not_allowed")
+        normalized_month = normalize_month_key(target_month)
 
         async with self.uow_factory() as uow:
             bank = await uow.banks.get_for_user(user_id, bank_id) if bank_id else None
@@ -36,7 +39,11 @@ class SaveBankDraftUseCase:
                 created = True
             else:
                 await uow.banks.update_name(bank.id, bank_name)
-            await uow.cashback.replace_for_bank(bank.id, items)
-            await uow.logs.add(user_id, "bank_added" if created else "bank_updated", {"bank_id": bank.id, "bank_name": bank.bank_name})
+            await uow.cashback.replace_for_bank(bank.id, normalized_month, items)
+            await uow.logs.add(
+                user_id,
+                "bank_added" if created else "bank_updated",
+                {"bank_id": bank.id, "bank_name": bank_name.strip(), "target_month": normalized_month},
+            )
             await uow.commit()
             return bank.id

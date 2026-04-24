@@ -3,8 +3,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from decimal import Decimal
 
+from app.application.auth.models import ExternalIdentityContext
+from app.application.auth.use_cases import AuthenticateExternalIdentityUseCase
 from app.application.contracts.ports import OCRPort, UnitOfWorkPort
-from app.application.models import UserContext
 from app.application.use_cases.change_language import ChangeLanguageUseCase
 from app.application.use_cases.delete_bank import DeleteBankUseCase
 from app.application.use_cases.delete_category import DeleteCategoryUseCase
@@ -16,9 +17,9 @@ from app.application.use_cases.log_event import LogEventUseCase
 from app.application.use_cases.parse_manual_cashback import ParseManualCashbackUseCase
 from app.application.use_cases.process_uploaded_image import ProcessUploadedImageUseCase
 from app.application.use_cases.save_bank_draft import SaveBankDraftUseCase
-from app.application.use_cases.sync_user import SyncTelegramUserUseCase
 from app.application.use_cases.toggle_notifications import ToggleNotificationsUseCase
 from app.application.workflow.dependencies import WorkflowDependencies
+from app.application.months import current_month_key
 from app.application.workflow.models import UserCommand, WorkflowState
 from app.application.workflow.text_intents import route_text
 from app.domain.models import CashbackDraftItem, UserAccount
@@ -59,9 +60,15 @@ def _build_deps(
 
 
 async def _create_user(uow_factory: Callable[[], UnitOfWorkPort]) -> UserAccount:
-    sync = SyncTelegramUserUseCase(uow_factory, default_language="ru")
-    return await sync.execute(
-        ctx=UserContext(external_user_id=1001, username="demo", full_name="Demo User"),
+    authenticate_external_identity = AuthenticateExternalIdentityUseCase(uow_factory, default_language="ru")
+    return await authenticate_external_identity.execute(
+        ExternalIdentityContext(
+            provider="telegram",
+            provider_user_id="1001",
+            provider_username="demo",
+            provider_display_name="Demo User",
+        ),
+        create_user_if_missing=True,
         log_action="user_started",
     )
 
@@ -105,6 +112,7 @@ async def test_delete_bank_text_intent_deletes_bank_and_returns_home(uow_factory
         user_id=user.id,
         bank_id=None,
         bank_name="T-Bank",
+        target_month=current_month_key(),
         items=[CashbackDraftItem(raw_category="Fuel", normalized_category="fuel", percent=Decimal("5"), source_type="manual")],
     )
 
@@ -125,6 +133,7 @@ async def test_delete_category_text_intent_returns_summary_screen(uow_factory, d
         user_id=user.id,
         bank_id=None,
         bank_name="T-Bank",
+        target_month=current_month_key(),
         items=[CashbackDraftItem(raw_category="Fuel", normalized_category=categories.normalize("Fuel").slug, percent=Decimal("5"), source_type="manual")],
     )
 
@@ -132,7 +141,7 @@ async def test_delete_category_text_intent_returns_summary_screen(uow_factory, d
 
     assert result.screen.id == "delete_category_result"
     assert result.screen.body_params == {"count": 1, "banks": 1}
-    assert list(store.bank_items.values()) == [[]]
+    assert all(month_items == [] for months in store.bank_items.values() for month_items in months.values())
 
 
 async def test_unknown_text_returns_help_with_status_effect(uow_factory, dummy_ocr) -> None:
@@ -146,3 +155,17 @@ async def test_unknown_text_returns_help_with_status_effect(uow_factory, dummy_o
 
     assert result.screen.id == "help"
     assert any(effect.kind == "show_status" and effect.payload["message_key"] == "errors.unknown_command" for effect in result.effects)
+
+
+async def test_cashback_like_text_routes_to_manual_import_without_pending_state(uow_factory, dummy_ocr) -> None:
+    categories = CategoryService()
+    parser = ParserService(categories)
+    ranking = RankingService(categories)
+    deps = _build_deps(uow_factory, categories, parser, ranking, dummy_ocr)
+    user = await _create_user(uow_factory)
+
+    command = await route_text(deps, user, WorkflowState(), "Fuel 5%\nRestaurants 7%")
+
+    assert isinstance(command, UserCommand)
+    assert command.name == "submit_manual_text"
+    assert command.payload["text"] == "Fuel 5%\nRestaurants 7%"

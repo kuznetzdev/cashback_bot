@@ -1,130 +1,180 @@
 # Пользовательские сценарии
 
-Этот документ фиксирует сквозные пользовательские сценарии продукта на уровне ядра и адаптеров.
+Этот документ фиксирует текущие пользовательские flow на уровне общего application core и его delivery adapters.
+Он описывает не vision, а фактически поддерживаемое поведение.
 
-Цель документа:
+Продуктовое позиционирование и более широкий roadmap вынесены в [PRODUCT_OVERVIEW](C:\Users\Kuznetz\Desktop\proga\cashback_bot\docs\ru\PRODUCT_OVERVIEW.md).
 
-- описать основные точки входа в систему
-- описать ожидаемые выходы и безопасные пути завершения сценариев
-- зафиксировать альтернативные ветки и ошибки
-- не допустить dead ends в UX
+## Назначение документа
 
-Важно:
+- зафиксировать реальные точки входа в систему
+- описать happy path и безопасные выходы
+- показать ветки ошибок и interrupt-поведение
+- убедиться, что web и Telegram используют один и тот же workflow core
 
-- документ описывает текущий baseline поведения системы
-- более широкий vision фиксируется отдельно в [docs/ru/PRODUCT_OVERVIEW.md](C:\Users\Kuznetz\Desktop\proga\cashback_bot\docs\ru\PRODUCT_OVERVIEW.md)
+## 1. Точки входа
 
-## 1. Общая карта входов
-
-### Web entry points
+### Web
 
 - `GET /`
+- `POST /auth/register`
+- `POST /auth/login`
+- `POST /auth/logout`
 - `GET /auth/telegram/callback`
+- `POST /auth/telegram/unlink`
 - `GET /app`
 - `POST /app/action`
 - `POST /app/input`
 - `POST /app/upload`
 
-### Telegram entry points
+### Telegram
 
 - `/start`
 - callbacks `nav:*`
 - slash commands `/help`, `/home`, `/top`, `/settings`, `/banks`, `/cancel`
-- text message
-- photo message
+- текстовое сообщение
+- фото-сообщение
 
-## 2. Общие UX-инварианты
+## 2. Общие инварианты
 
-- Любой пользовательский ввод должен приводить к следующему экрану, status message или error message.
+- Любое пользовательское действие должно приводить к следующему экрану, статусу или локализованной ошибке.
 - Silent state запрещен.
-- На каждом экране должен быть безопасный выход.
-- При попытке выйти из незавершенного сценария пользователь должен попадать в `interrupt_flow`.
-- Web и Telegram обязаны использовать одну и ту же семантику `handle_command(...)`.
+- Незавершенный draft нельзя молча потерять.
+- Любой adapter обязан маппить входящие события в общий `UserCommand`.
+- Любой adapter обязан рендерить общий `Screen`, а не собственную бизнес-логику.
+- OCR и free-text parsing никогда не считаются финальным источником истины без preview.
 
-## 3. Основной сценарий: First Value
+## 3. First Value
 
 ### Цель
 
-За 1-2 минуты довести пользователя до первого полезного результата:
+За короткий сценарий довести пользователя до первого полезного результата:
 
-- добавить данные по банку/карте
-- проверить распознавание
-- получить рейтинг или карточку банка
+1. войти в продукт
+2. создать или импортировать банк
+3. проверить preview
+4. сохранить банк
+5. открыть детали банка или рейтинг
 
 ### Базовый happy path
 
-1. Пользователь входит в продукт.
-2. Открывается `home`.
-3. Пользователь идет в `add bank`.
-4. Выбирает банк или вводит alias.
+1. Пользователь входит в систему.
+2. Получает `home`.
+3. Переходит в `add bank`.
+4. Выбирает банк.
 5. Выбирает способ ввода.
-6. Загружает данные.
-7. Проверяет preview.
-8. Сохраняет.
+6. Формирует draft.
+7. Проверяет и правит preview.
+8. Сохраняет банк.
 9. Переходит в `bank_details` или `top`.
 
-## 4. Flow: Add Bank -> Manual Input
+## 4. Аутентификация и вход
 
-- вход: `home -> open_add_bank`
-- выбор банка: preset или custom name
-- выбор метода: `manual`
-- ввод строк вида `АЗС 5%`
-- parser + normalization
-- переход в `preview`
-- редактирование и сохранение
+### Flow: Local Web Auth
 
-Выходы:
+#### Регистрация
 
-- `save_bank -> bank_details`
-- `cancel_flow -> home`
-- `interrupt_flow` при попытке уйти
+1. Пользователь открывает `/`.
+2. Отправляет `POST /auth/register`.
+3. Система создает platform user и `local_credentials`.
+4. Создается web session.
+5. Выполняется redirect на `/app`.
 
-Ошибки:
+#### Вход
+
+1. Пользователь открывает `/`.
+2. Отправляет `POST /auth/login`.
+3. Система проверяет local credentials.
+4. Создается session.
+5. Открывается `/app`.
+
+### Flow: Telegram Identity Auth
+
+#### Telegram bot
+
+1. Пользователь пишет `/start`.
+2. Telegram adapter строит `ExternalIdentityContext(provider="telegram")`.
+3. Вызывается `authenticate_external_identity(... create_user_if_missing=True)`.
+4. Пользователь попадает в общий workflow `start`.
+
+#### Telegram callback в web
+
+1. Пользователь проходит Telegram Login widget.
+2. Web adapter принимает `/auth/telegram/callback`.
+3. Если identity уже привязана, открывается существующий account.
+4. Если callback идет из authenticated web session, identity может быть привязана к текущему пользователю.
+
+### Guardrails
+
+- Невалидная session не дает доступа к `/app`.
+- Невалидный Telegram callback не должен создавать произвольный web session.
+- Telegram identity не является канонической user-моделью, а только external identity provider.
+
+## 5. Создание банка
+
+### Flow: Add Bank -> Manual Input
+
+1. `home -> open_add_bank`
+2. выбор банка из preset или ввод имени
+3. выбор метода `manual`
+4. ввод строк вроде `АЗС 5%`
+5. parser и normalization
+6. переход в `preview`
+7. редактирование
+8. `save_bank`
+
+Успешный выход:
+
+- `bank_details`
+- status effect о сохранении
+
+Типовые ошибки:
 
 - пустой текст
-- невалидный формат
-- невалидный процент
+- нераспознаваемый формат строки
+- некорректный процент
 
-## 5. Flow: Add Bank -> Photo OCR
+### Flow: Add Bank -> Photo OCR
 
-- вход: `home -> open_add_bank`
-- выбор банка
-- выбор метода `photo`
-- загрузка изображения
-- OCR adapter: validation, temp file, preprocessing, tesseract, cleanup
-- parser + normalization
-- переход в `preview`
+1. `home -> open_add_bank`
+2. выбор банка
+3. выбор метода `photo`
+4. переход в состояние `photo_upload`
+5. adapter принимает изображение и строит `ImageUpload`
+6. OCR use case извлекает текст
+7. parser строит draft
+8. открывается `preview`
 
-Выходы:
+Успешный выход:
 
-- `save_bank -> bank_details`
-- `cancel_flow -> home`
-- `interrupt_flow`
+- `bank_details` после `save_bank`
 
-Ошибки:
+Типовые ошибки:
 
-- слишком большой файл
+- файл больше разрешенного лимита
 - битое изображение
 - OCR timeout
-- OCR не дал полезный текст
+- OCR не дал полезного результата
 
-## 6. Flow: Add Bank -> Template
+### Flow: Add Bank -> Template
 
-- выбор банка
-- выбор метода `template`
-- создание template draft
-- открытие `preview`
-- заполнение процентов и правка состава строк
+1. `home -> open_add_bank`
+2. выбор банка
+3. выбор метода `template`
+4. создание template-based draft
+5. открытие `preview`
+6. правка процентов и состава строк
+7. `save_bank`
 
-Особое правило:
+Правило:
 
-- строки с `percent <= 0` нельзя сохранять
+- строки с `percent <= 0` не считаются валидными для сохранения
 
-## 7. Flow: Preview Editing
+## 6. Preview и редактирование
 
-`preview` — главный экран редактирования.
+`preview` — центральный рабочий экран текущего продукта.
 
-Входы:
+Точки входа:
 
 - после manual parse
 - после OCR parse
@@ -132,177 +182,194 @@
 - после `edit_bank`
 - после `continue_draft`
 
-Действия:
+Поддерживаемые действия:
 
 - `pick_item`
 - `add_item`
-- `save_bank`
-- `cancel_flow`
-
-Внутри item editing:
-
 - `edit_item_category`
 - `edit_item_percent`
 - `delete_item`
 - `open_preview`
+- `save_bank`
+- `cancel_flow`
 
-## 8. Flow: Save Draft
+Смысл flow:
 
-Preconditions:
+- пока не вызван `save_bank`, изменения живут только в `WorkflowState`
+- пользователь может свободно исправлять draft без записи в persistence
+
+## 7. Сохранение draft
+
+### Preconditions
 
 - задан `selected_bank_name`
 - draft не пустой
-- все items имеют `percent > 0`
+- все сохраняемые строки имеют валидный процент
 
-Система:
+### Поведение системы
 
-- создает или находит банк
-- обновляет имя при необходимости
-- атомарно заменяет `cashback_items`
-- пишет `user_logs`
+1. Находит или создает банк пользователя.
+2. При необходимости обновляет имя банка.
+3. Атомарно заменяет набор `cashback_items`.
+4. Добавляет запись в `user_logs`.
+5. Возвращает `bank_details`.
+
+### Результат
+
+- банк сохранен как актуальный снимок текущих cashback-категорий
+- пользователь видит сохраненное состояние, а не промежуточный draft
+
+## 8. Работа с сохраненным банком
+
+### Flow: Open Bank
+
+1. `home -> open_my_banks`
+2. пользователь выбирает банк
+3. открывается `bank_details`
+
+### Flow: Edit Saved Bank
+
+1. `bank_details -> edit_bank`
+2. система загружает `BankAggregate`
+3. копирует текущие items в draft
+4. пользователь повторно проходит `preview/edit`
+5. `save_bank` заменяет сохраненное состояние
+
+### Flow: Delete Bank
+
+1. `bank_details -> request_delete_bank`
+2. открывается экран подтверждения
+3. пользователь подтверждает `confirm_delete_bank` или возвращается назад
 
 Успешный выход:
 
-- `bank_details`
-- status `saved_bank`
+- безопасный возврат на `home`
 
-## 9. Flow: Edit Saved Bank
+## 9. Рейтинг и быстрый выбор карты
 
-Вход:
+### Flow: Open Top
 
-- `home -> open_my_banks -> open_bank -> edit_bank`
+1. `home -> open_top`
+2. система загружает банки пользователя
+3. строит ranking entries
+4. рассчитывает лидеров по категориям
+5. открывает `top`
 
-Шаги:
+### Flow: Open Top Category
 
-- загрузка `BankAggregate`
-- клонирование items в draft
-- повторное использование `preview`
-- сохранение целиком
+1. пользователь выбирает категорию из `top`
+2. открывается `top_category`
+3. система показывает все лучшие варианты по этой категории
 
-## 10. Flow: Delete Bank
+Правило:
 
-Вход:
+- при ничьей сохраняются все лидеры, а не один произвольный банк
 
-- `bank_details -> request_delete_bank`
+### Flow: Quick Query из свободного текста
 
-Шаги:
+Поддерживаемые варианты:
 
-- `confirm_delete_bank`
-- подтверждение или возврат назад
-
-Успешный выход:
-
-- `home`
-
-## 11. Flow: Ranking
-
-Вход:
-
-- `home -> open_top`
-- best-query из свободного текста
-
-Шаги:
-
-- загрузка банков пользователя
-- сбор ranking entries
-- расчет category leaders
-- расчет top global
-- открытие `top`
-- переход в `top_category`
-
-Особое правило:
-
-- при ничьей сохраняются все лидеры
-
-## 12. Flow: Quick Query / «Чем платить?»
-
-Поддерживаемые intent types:
-
-- best query
-- delete bank
-- delete category
-
-Best-query открывает `top_category`.
-Delete-bank удаляет банк и возвращает в `home`.
-Delete-category открывает `delete_category_result`.
-Если intent не распознан, открывается `help`.
-
-## 13. Flow: Settings
-
-Вход:
-
-- `home -> open_settings`
-
-Действия:
-
-- `set_language(ru|en)`
-- `toggle_notifications`
-
-Выход:
-
-- повторный рендер `settings`
-
-## 14. Flow: History
-
-Вход:
-
-- `home -> open_history`
+- запрос в духе "лучшая карта для азс"
+- свободный текст, который parser понимает как best-category intent
+- свободный текст, который parser понимает как delete intent
 
 Поведение:
 
-- загрузка последних `user_logs`
-- empty state, если логов нет
+- text intent router пытается понять запрос
+- при успехе переводит его в обычный workflow command
+- при неуспехе возвращает help или понятный status effect
 
-## 15. Flow: Interrupt And Recovery
+## 10. Настройки, история и напоминания
 
-Срабатывает, если у пользователя есть активный незавершенный flow:
+### Flow: Settings
 
-- есть draft items
-- выбран банк
-- есть pending input
-- идет редактирование item
+1. `home -> open_settings`
+2. пользователь меняет язык через `set_language`
+3. пользователь включает или отключает напоминания через `toggle_notifications`
 
-При попытке уйти на другой раздел открывается `interrupt_flow`.
+Результат:
 
-Варианты:
+- настройки сохраняются на уровне platform user
+
+### Flow: History
+
+1. `home -> open_history`
+2. система читает `user_logs`
+3. показывает последние действия пользователя
+
+### Flow: Reminder Delivery
+
+1. у пользователя включены уведомления
+2. scheduler инициирует reminder use case
+3. система находит linked reminder targets
+4. sender adapter доставляет напоминание по доступному каналу
+
+Текущее рабочее поведение:
+
+- основная operational delivery-модель ориентирована на linked Telegram targets
+- источник истины для маршрутизации — `user_identities`, а не legacy-поля на `users`
+
+## 11. Interrupt flow
+
+### Когда возникает interrupt
+
+Interrupt нужен, когда пользователь пытается уйти с незавершенного draft flow на безопасную навигационную цель:
+
+- `open_home`
+- `open_top`
+- `open_settings`
+- `open_history`
+- другие команды, которые уводят с текущего draft-сценария
+
+### Поведение
+
+Система вместо silent navigation открывает `interrupt_flow` и предлагает:
 
 - `continue_draft`
 - `discard_draft_and_go`
-- `save_draft_and_go`, если draft валиден
+- `save_draft_and_go`, если draft уже валиден
 
-## 16. Web session flow
+### Отдельный случай
 
-- `GET /app` при валидной session рендерит текущий экран
-- без session делает redirect на `/`
-- `POST /auth/logout` очищает session и ведет на landing
+Interrupt может возникать даже если пользователь уже выбрал банк и метод ввода, но еще не собрал полноценный список cashback items.
+Такое состояние тоже не должно теряться молча.
 
-## 17. Telegram-specific notes
+## 12. Telegram-specific особенности
 
-- slash commands маппятся в `UserCommand`
-- photo message работает только при `pending_input_kind == photo_upload`
-- callback errors отдаются пользователю без падения процесса
+Telegram adapter добавляет только transport-specific слой:
 
-## 18. Карта экранов
+- `/start` и slash commands маппятся в обычные `UserCommand`
+- inline кнопки кодируются как `nav:*`
+- текст маппится либо в slash command, либо в `submit_text`
+- фото принимаются только в `pending_input_kind == "photo_upload"`
+- рендерер старается переиспользовать уже отправленный bot message и редактировать его на месте
 
-Базовые screen ids текущего baseline:
+Следствие:
 
-- `home`
-- `help`
-- `choose_bank`
-- `custom_bank_name`
-- `input_method`
-- `manual_prompt`
-- `photo_prompt`
-- `preview`
-- `edit_item`
-- `item_category_prompt`
-- `item_percent_prompt`
-- `my_banks`
-- `bank_details`
-- `confirm_delete_bank`
-- `top`
-- `top_category`
-- `settings`
-- `history`
-- `interrupt_flow`
-- `delete_category_result`
+- Telegram-бот уже не владеет workflow
+- он является экранным и событийным адаптером поверх общего core
+
+## 13. Ошибки и guardrails
+
+Система должна корректно переживать:
+
+- невалидный ввод пользователя
+- ошибки OCR
+- невалидные callbacks
+- runtime и I/O ошибки adapter-уровня
+
+Ожидаемое поведение:
+
+- локализованная ошибка для пользователя
+- сохранение валидного session/workflow state
+- отсутствие silent failures
+
+## 14. Что важно для дальнейшего развития
+
+Любой новый flow должен сохранять текущие свойства:
+
+- один общий `handle_command(...)` / workflow entrypoint semantics для всех adapters
+- screen-driven navigation
+- явный preview перед записью пользовательских данных
+- interrupt protection для незавершенных draft-сценариев
+- отсутствие transport-specific business logic внутри adapters

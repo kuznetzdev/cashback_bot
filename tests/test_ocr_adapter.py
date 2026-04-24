@@ -104,3 +104,25 @@ def test_ocr_adapter_uses_tesseract_config(tmp_path: Path, monkeypatch: pytest.M
     assert text == "АЗС 5%"
     assert captured["lang"] == "rus+eng"
     assert captured["config"] == "--oem 3 --psm 6 -c preserve_interword_spaces=1"
+
+
+def test_ocr_adapter_falls_back_to_sparse_config_for_screenshot_layout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    image_path = tmp_path / "ocr.png"
+    Image.new("RGB", (80, 40), color="white").save(image_path, format="PNG")
+    configs: list[str] = []
+
+    def _fake_image_to_string(_image, **kwargs):
+        config = str(kwargs["config"])
+        configs.append(config)
+        if "--psm 6" in config:
+            return "   "
+        return "АЗС 5%\nТакси 3%"
+
+    monkeypatch.setattr(pytesseract, "image_to_string", _fake_image_to_string)
+    text = TesseractOCRAdapter._ocr(image_path)
+
+    assert text == "АЗС 5%\nТакси 3%"
+    assert configs == [
+        "--oem 3 --psm 6 -c preserve_interword_spaces=1",
+        "--oem 3 --psm 11 -c preserve_interword_spaces=1",
+    ]

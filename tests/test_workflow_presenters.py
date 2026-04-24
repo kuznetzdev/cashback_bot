@@ -7,6 +7,7 @@ from app.application.presenters.workflow_formatters import (
     format_history_entries,
     format_items_lines,
     format_ranking,
+    format_target_month,
     target_label,
 )
 from app.application.presenters.workflow_screens import (
@@ -15,6 +16,7 @@ from app.application.presenters.workflow_screens import (
     preview_screen,
     settings_screen,
 )
+from app.application.months import current_month_key
 from app.application.workflow.models import WorkflowState
 from app.domain.models import BankScore, CashbackDraftItem, CategoryLeader, UserAccount, UserLogEntry
 from app.domain.services.categories import CategoryService
@@ -32,6 +34,7 @@ def test_preview_screen_produces_stable_transport_neutral_contract() -> None:
                 source_type="manual",
             )
         ],
+        target_month=current_month_key(),
         temp_payload={"source_type": "manual"},
     )
 
@@ -42,8 +45,18 @@ def test_preview_screen_produces_stable_transport_neutral_contract() -> None:
     assert screen.body_key == "screens.preview"
     assert screen.body_params["bank_name"] == "T-Bank"
     assert screen.body_params["source_type"] == "manual"
+    assert screen.body_params["target_month"] == format_target_month(current_month_key())
     assert "Fuel: 5%" in str(screen.body_params["items"])
-    assert [action.command for action in screen.actions[-3:]] == ["add_item", "save_bank", "cancel_flow"]
+    assert [action.command for action in screen.actions] == [
+        "change_selected_bank",
+        "set_target_month",
+        "set_target_month",
+        "set_target_month",
+        "pick_item",
+        "save_bank",
+        "add_item",
+        "cancel_flow",
+    ]
 
 
 def test_interrupt_screen_hides_save_action_when_draft_cannot_be_saved() -> None:

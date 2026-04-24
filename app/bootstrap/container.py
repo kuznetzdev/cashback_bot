@@ -10,7 +10,7 @@ from app.adapters.ocr_tesseract import TesseractOCRAdapter
 from app.adapters.postgres.session import create_session_factory
 from app.adapters.postgres.uow import SqlAlchemyUnitOfWork, build_uow_factory
 from app.adapters.system import SystemClock
-from app.application import ApplicationFacade
+from app.application.facade import ApplicationFacade
 from app.application.auth.use_cases import (
     AuthenticateExternalIdentityUseCase,
     AuthenticateLocalUserUseCase,
@@ -25,11 +25,12 @@ from app.application.use_cases.handle_command import HandleCommandUseCase
 from app.application.use_cases.get_bank_details import GetBankDetailsUseCase
 from app.application.use_cases.get_history import GetHistoryUseCase
 from app.application.use_cases.get_user_banks import GetUserBanksUseCase
+from app.application.use_cases.get_workflow_state import GetWorkflowStateUseCase
 from app.application.use_cases.log_event import LogEventUseCase
 from app.application.use_cases.process_uploaded_image import ProcessUploadedImageUseCase
+from app.application.use_cases.save_workflow_state import SaveWorkflowStateUseCase
 from app.application.use_cases.send_monthly_reminders import SendMonthlyRemindersUseCase
 from app.application.use_cases.save_bank_draft import SaveBankDraftUseCase
-from app.application.use_cases.sync_user import SyncTelegramUserUseCase
 from app.application.use_cases.change_language import ChangeLanguageUseCase
 from app.application.use_cases.delete_bank import DeleteBankUseCase
 from app.application.use_cases.delete_category import DeleteCategoryUseCase
@@ -87,7 +88,12 @@ def build_core_container(settings: Settings) -> CoreContainer:
     )
 
 
-def build_application_facade(core: CoreContainer, reminder_sender: ReminderSenderPort) -> ApplicationFacade:
+def build_application_facade(
+    core: CoreContainer,
+    reminder_sender: ReminderSenderPort,
+    *,
+    delivery_provider: str | None = None,
+) -> ApplicationFacade:
     password_hasher = Argon2PasswordHasher()
     register_local_user = RegisterLocalUserUseCase(core.uow_factory, password_hasher, default_language=core.settings.lang_default)
     authenticate_local_user = AuthenticateLocalUserUseCase(core.uow_factory, password_hasher)
@@ -96,7 +102,6 @@ def build_application_facade(core: CoreContainer, reminder_sender: ReminderSende
     unlink_external_identity = UnlinkExternalIdentityUseCase(core.uow_factory)
     get_user_account = GetUserAccountUseCase(core.uow_factory)
     list_external_identities = ListExternalIdentitiesUseCase(core.uow_factory)
-    sync_user = SyncTelegramUserUseCase(core.uow_factory, default_language=core.settings.lang_default)
     parse_manual = ParseManualCashbackUseCase(core.parser)
     process_uploaded_image = ProcessUploadedImageUseCase(core.ocr, core.parser)
     save_bank_draft = SaveBankDraftUseCase(core.uow_factory)
@@ -109,6 +114,8 @@ def build_application_facade(core: CoreContainer, reminder_sender: ReminderSende
     change_language = ChangeLanguageUseCase(core.uow_factory)
     toggle_notifications = ToggleNotificationsUseCase(core.uow_factory)
     log_event = LogEventUseCase(core.uow_factory)
+    get_workflow_state = GetWorkflowStateUseCase(core.uow_factory)
+    save_workflow_state = SaveWorkflowStateUseCase(core.uow_factory)
     handle_command = HandleCommandUseCase(
         uow_factory=core.uow_factory,
         parser=core.parser,
@@ -133,6 +140,7 @@ def build_application_facade(core: CoreContainer, reminder_sender: ReminderSende
         sender=reminder_sender,
         clock=core.clock,
         reminder_hour=core.settings.reminder_hour,
+        delivery_provider=delivery_provider,
     )
     return ApplicationFacade(
         register_local_user,
@@ -142,8 +150,9 @@ def build_application_facade(core: CoreContainer, reminder_sender: ReminderSende
         unlink_external_identity,
         get_user_account,
         list_external_identities,
-        sync_user,
         handle_command,
+        get_workflow_state,
+        save_workflow_state,
         reminders,
         log_event,
     )

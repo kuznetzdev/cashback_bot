@@ -75,7 +75,11 @@ class WorkflowDispatcher:
             if current_command.name == "save_bank":
                 bank_id = await draft.save_bank(self.deps, current_user.id, current_state)
                 queued_effects.append(Effect(kind="show_status", payload={"message_key": "messages.saved_bank", "transient": True}))
-                current_command = UserCommand(name="open_bank", payload={"id": bank_id})
+                open_payload: dict[str, object] = {"id": bank_id}
+                if current_state.target_month is not None:
+                    open_payload["month"] = current_state.target_month
+                current_state = WorkflowState()
+                current_command = UserCommand(name="open_bank", payload=open_payload)
                 continue
 
             result = await draft.handle_command(self.deps, current_user, current_state, current_command)

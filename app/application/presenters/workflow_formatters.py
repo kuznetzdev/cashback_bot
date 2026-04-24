@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.application.months import format_month_label
 from app.domain.models import BankScore, CashbackDraftItem, CategoryLeader, UserLogEntry
 from app.domain.services.categories import CategoryService
 
@@ -21,6 +22,10 @@ def format_ranking(leaders: list[CategoryLeader], global_rating: list[BankScore]
     leaders_text = "\n".join(f"- {item.category_name}: {item.best_percent}% ({', '.join(item.bank_names)})" for item in leaders)
     global_text = "\n".join(f"- {item.bank_name}: {item.score}" for item in global_rating)
     return leaders_text, global_text
+
+
+def format_target_month(month_key: str | None) -> str:
+    return format_month_label(month_key)
 
 
 def target_label(target_name: str) -> str:

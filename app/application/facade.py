@@ -10,11 +10,11 @@ from app.application.auth.use_cases import (
     RegisterLocalUserUseCase,
     UnlinkExternalIdentityUseCase,
 )
-from app.application.models import UserContext
 from app.application.use_cases.handle_command import HandleCommandUseCase
+from app.application.use_cases.get_workflow_state import GetWorkflowStateUseCase
 from app.application.use_cases.log_event import LogEventUseCase
+from app.application.use_cases.save_workflow_state import SaveWorkflowStateUseCase
 from app.application.use_cases.send_monthly_reminders import SendMonthlyRemindersUseCase
-from app.application.use_cases.sync_user import SyncTelegramUserUseCase
 from app.application.workflow.models import UserCommand, WorkflowResult, WorkflowState
 from app.domain.models import UserAccount, UserIdentity
 
@@ -29,8 +29,9 @@ class ApplicationFacade:
         unlink_external_identity_use_case: UnlinkExternalIdentityUseCase,
         get_user_account_use_case: GetUserAccountUseCase,
         list_external_identities_use_case: ListExternalIdentitiesUseCase,
-        sync_user_use_case: SyncTelegramUserUseCase,
         handle_command_use_case: HandleCommandUseCase,
+        get_workflow_state_use_case: GetWorkflowStateUseCase,
+        save_workflow_state_use_case: SaveWorkflowStateUseCase,
         reminders_use_case: SendMonthlyRemindersUseCase,
         log_event_use_case: LogEventUseCase,
     ) -> None:
@@ -41,8 +42,9 @@ class ApplicationFacade:
         self.unlink_external_identity_use_case = unlink_external_identity_use_case
         self.get_user_account_use_case = get_user_account_use_case
         self.list_external_identities_use_case = list_external_identities_use_case
-        self.sync_user_use_case = sync_user_use_case
         self.handle_command_use_case = handle_command_use_case
+        self.get_workflow_state_use_case = get_workflow_state_use_case
+        self.save_workflow_state_use_case = save_workflow_state_use_case
         self.reminders_use_case = reminders_use_case
         self.log_event_use_case = log_event_use_case
 
@@ -77,11 +79,17 @@ class ApplicationFacade:
     async def list_external_identities(self, *, user_id: int) -> list[UserIdentity]:
         return await self.list_external_identities_use_case.execute(user_id=user_id)
 
-    async def sync_user(self, ctx: UserContext, *, log_action: str | None = None) -> UserAccount:
-        return await self.sync_user_use_case.execute(ctx, log_action=log_action)
-
     async def handle_command(self, user: UserAccount, state: WorkflowState, command: UserCommand) -> WorkflowResult:
         return await self.handle_command_use_case.execute(user, state, command)
+
+    async def resume_workflow(self, user: UserAccount, state: WorkflowState) -> WorkflowResult:
+        return await self.handle_command_use_case.resume(user, state)
+
+    async def get_workflow_state(self, *, user_id: int) -> WorkflowState:
+        return await self.get_workflow_state_use_case.execute(user_id)
+
+    async def save_workflow_state(self, *, user_id: int, state: WorkflowState) -> None:
+        await self.save_workflow_state_use_case.execute(user_id=user_id, state=state)
 
     async def send_monthly_reminders(self) -> int:
         return await self.reminders_use_case.execute()

@@ -8,15 +8,14 @@ from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, User as TelegramUser
 
 from app.adapters.telegram.callbacks import decode_callback
 from app.adapters.telegram.renderer import TelegramScreenRenderer
-from app.adapters.telegram.state import load_workflow_state, save_workflow_state
-from app.application import ApplicationFacade
+from app.application.facade import ApplicationFacade
 from app.application.auth.models import ExternalIdentityContext
 from app.application.dto.media import ImageUpload
-from app.application.models import Effect, UserCommand
+from app.application.workflow.models import Effect, UserCommand
 from app.domain.errors import DomainError
 from app.domain.models import UserAccount
 from app.i18n.localizer import Localizer
@@ -66,13 +65,6 @@ def build_router(deps: TelegramDependencies) -> Router:
     @router.message(F.photo)
     async def on_photo(message: Message, state: FSMContext) -> None:
         user = await _sync_user_only(deps, message)
-        workflow = await load_workflow_state(state)
-        if workflow.pending_input_kind != "photo_upload":
-            await deps.renderer.notify_error(
-                message,
-                deps.localizer.t("errors.send_photo_or_text", user.language),
-            )
-            return
 
         status: Message | None = None
         try:
@@ -148,9 +140,12 @@ async def _handle_event(
         language = user.language
         if reset_state:
             await state.clear()
-        workflow = await load_workflow_state(state)
-        result = await deps.facade.handle_command(user, workflow, command)
-        await save_workflow_state(state, result.state)
+        workflow = await deps.facade.get_workflow_state(user_id=user.id)
+        if command.name == "start" and not workflow.is_empty():
+            result = await deps.facade.resume_workflow(user, workflow)
+        else:
+            result = await deps.facade.handle_command(user, workflow, command)
+        await deps.facade.save_workflow_state(user_id=result.user.id, state=result.state)
         await deps.renderer.render(event=event, state=state, screen=result.screen, language=result.user.language)
         await _apply_effects(deps=deps, event=event, user=result.user, language=result.user.language, effects=result.effects)
     except DomainError as error:
@@ -207,16 +202,20 @@ async def _sync_user_only(
         from_user = event.from_user
     if from_user is None:
         raise RuntimeError("Update does not have from_user")
-    identity = ExternalIdentityContext(
-        provider="telegram",
-        provider_user_id=str(from_user.id),
-        provider_username=from_user.username,
-        provider_display_name=from_user.full_name,
-    )
+    identity = _build_telegram_identity(from_user)
     return await deps.facade.authenticate_external_identity(
         identity,
         create_user_if_missing=True,
         log_action=log_action,
+    )
+
+
+def _build_telegram_identity(from_user: TelegramUser) -> ExternalIdentityContext:
+    return ExternalIdentityContext(
+        provider="telegram",
+        provider_user_id=str(from_user.id),
+        provider_username=from_user.username,
+        provider_display_name=from_user.full_name,
     )
 
 

@@ -13,10 +13,11 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.adapters.auth_telegram import verify_telegram_login
-from app.application import ApplicationFacade
 from app.application.auth.models import LocalAuthenticationCommand, LocalRegistrationCommand
 from app.application.dto.media import ImageUpload
-from app.application.models import Action, Effect, Screen, UserCommand, WorkflowResult, WorkflowState
+from app.application.facade import ApplicationFacade
+from app.application.months import format_month_label
+from app.application.workflow.models import Action, Effect, Screen, UserCommand, WorkflowResult, WorkflowState
 from app.domain.errors import DomainError
 from app.domain.models import UserAccount, UserIdentity
 from app.i18n.localizer import Localizer
@@ -24,9 +25,27 @@ from app.i18n.localizer import Localizer
 logger = logging.getLogger(__name__)
 
 SESSION_USER_ID_KEY = "web_user_id"
-SESSION_STATE_KEY = "workflow_state"
 SESSION_SCREEN_KEY = "screen_cache"
 DEFAULT_ACTIONS_LIMIT = 8
+PINNED_ACTION_COMMANDS = {
+    "select_bank_other",
+    "open_home",
+    "open_preview",
+    "cancel_flow",
+    "save_bank",
+    "add_item",
+    "change_selected_bank",
+}
+ACTION_SECTION_ORDER = ("primary", "choices", "items", "utility", "navigation", "danger", "default")
+ACTION_SECTION_TITLE_KEYS = {
+    "primary": "labels.section_primary",
+    "choices": "labels.section_choices",
+    "items": "labels.section_items",
+    "utility": "labels.section_utility",
+    "navigation": "labels.section_navigation",
+    "danger": "labels.section_danger",
+    "default": "labels.section_more",
+}
 
 
 @dataclass(slots=True)
@@ -137,7 +156,7 @@ def create_web_app(deps: WebDependencies) -> FastAPI:
                 templates=templates,
                 request=request,
                 user=user,
-                state=_get_state_from_session(request),
+                state=await deps.facade.get_workflow_state(user_id=user.id),
                 error=error,
             )
         return RedirectResponse(url="/app", status_code=303)
@@ -152,14 +171,15 @@ def create_web_app(deps: WebDependencies) -> FastAPI:
         user = await _get_current_user(request, deps)
         if user is None:
             return RedirectResponse(url="/", status_code=303)
-        state = _get_state_from_session(request)
-        screen = _get_screen_from_session(request)
-        if screen is None:
+        state = await deps.facade.get_workflow_state(user_id=user.id)
+        if state.is_empty():
             result = await deps.facade.handle_command(user, state, UserCommand(name="open_home"))
-            _persist_workflow(request, result)
-            user = result.user
-            state = result.state
-            screen = result.screen
+        else:
+            result = await deps.facade.resume_workflow(user, state)
+        await _persist_workflow(request, deps, result)
+        user = result.user
+        state = result.state
+        screen = result.screen
         identities = await deps.facade.list_external_identities(user_id=user.id)
         return templates.TemplateResponse(
             request=request,
@@ -181,7 +201,7 @@ def create_web_app(deps: WebDependencies) -> FastAPI:
         user = await _get_current_user(request, deps)
         if user is None:
             return RedirectResponse(url="/", status_code=303)
-        state = _get_state_from_session(request)
+        state = await deps.facade.get_workflow_state(user_id=user.id)
         form = await request.form()
         command_name = str(form.get("command", "")).strip()
         payload = _parse_payload(str(form.get("payload_json", "{}")))
@@ -208,7 +228,7 @@ def create_web_app(deps: WebDependencies) -> FastAPI:
         user = await _get_current_user(request, deps)
         if user is None:
             return RedirectResponse(url="/", status_code=303)
-        state = _get_state_from_session(request)
+        state = await deps.facade.get_workflow_state(user_id=user.id)
         form = await request.form()
         return await _execute_and_render(
             deps=deps,
@@ -224,16 +244,7 @@ def create_web_app(deps: WebDependencies) -> FastAPI:
         user = await _get_current_user(request, deps)
         if user is None:
             return RedirectResponse(url="/", status_code=303)
-        state = _get_state_from_session(request)
-        if state.pending_input_kind != "photo_upload":
-            return await _render_with_domain_error(
-                deps=deps,
-                templates=templates,
-                request=request,
-                user=user,
-                state=state,
-                error=DomainError("errors.send_photo_or_text"),
-            )
+        state = await deps.facade.get_workflow_state(user_id=user.id)
         data = await file.read(deps.max_upload_size + 1)
         if len(data) > deps.max_upload_size:
             return await _render_with_domain_error(
@@ -296,7 +307,7 @@ async def _execute_and_render(
             error=error,
         )
     status_messages = await _apply_effects(deps, result.user, result.effects)
-    _persist_workflow(request, result)
+    await _persist_workflow(request, deps, result)
     identities = await deps.facade.list_external_identities(user_id=result.user.id)
     return templates.TemplateResponse(
         request=request,
@@ -325,8 +336,11 @@ async def _render_with_domain_error(
 ) -> Response:
     screen = _get_screen_from_session(request)
     if screen is None:
-        fallback = await deps.facade.handle_command(user, state, UserCommand(name="open_home"))
-        _persist_workflow(request, fallback)
+        if state.is_empty():
+            fallback = await deps.facade.handle_command(user, state, UserCommand(name="open_home"))
+        else:
+            fallback = await deps.facade.resume_workflow(user, state)
+        await _persist_workflow(request, deps, fallback)
         user = fallback.user
         state = fallback.state
         screen = fallback.screen
@@ -393,8 +407,10 @@ def _build_context(
     actions_limit = _parse_actions_limit(request.query_params.get("actions_limit"))
     visible_actions, has_more_actions, next_actions_limit = _paginate_actions(screen.actions, actions_limit)
     action_views = [_to_action_view(deps, action, language) for action in visible_actions]
-    _ensure_mobile_navigation(action_views, deps, language)
+    _ensure_mobile_navigation(action_views, deps, language, screen.id)
+    action_sections = _build_action_sections(action_views, deps, language)
     telegram_linked = any(identity.provider == "telegram" for identity in identities)
+    flow_summary = _build_flow_summary(deps, language, state, screen, telegram_linked)
     return {
         "language": language,
         "app_title": "Cashback Analyzer",
@@ -405,9 +421,17 @@ def _build_context(
         "status_messages": status_messages,
         "error_message": error_message,
         "actions": action_views,
+        "action_sections": action_sections,
         "has_more_actions": has_more_actions,
         "next_actions_limit": next_actions_limit,
         "input_panel": _build_input_panel(screen.expects_input, deps, language),
+        "flow_summary": flow_summary,
+        "workflow_steps_title": deps.localizer.t("labels.workflow_steps", language),
+        "workflow_steps": [
+            deps.localizer.t("messages.workflow_step_capture", language),
+            deps.localizer.t("messages.workflow_step_review", language),
+            deps.localizer.t("messages.workflow_step_save", language),
+        ],
         "upload_max_bytes": deps.max_upload_size,
         "state_pending_kind": state.pending_input_kind,
         "user_name": user.display_name,
@@ -430,23 +454,107 @@ def _to_action_view(deps: WebDependencies, action: Action, language: str) -> dic
     variant = action.variant
     if action.destructive or action.command in {"delete_item", "request_delete_bank", "confirm_delete_bank"}:
         variant = "danger"
-    elif variant == "secondary" and action.command in {"save_bank", "open_add_bank", "choose_input_method"}:
+    elif variant == "secondary" and action.command in {"save_bank", "open_add_bank", "choose_input_method", "select_bank_other", "add_item"}:
         variant = "primary"
     elif variant == "secondary" and action.command in {"open_home", "open_preview", "cancel_flow", "open_top"}:
         variant = "ghost"
+    group = action.group or _infer_action_group(action.command, variant)
     return {
         "command": action.command,
         "label": deps.localizer.t(action.label_key, language),
         "payload_json": json.dumps(_jsonify(action.payload), ensure_ascii=False),
         "variant": variant,
-        "group": action.group or "default",
+        "group": group,
         "destructive": action.destructive,
     }
 
 
-def _ensure_mobile_navigation(actions: list[dict[str, object]], deps: WebDependencies, language: str) -> None:
+def _infer_action_group(command: str, variant: str) -> str:
+    if variant == "danger":
+        return "danger"
+    if command in {"open_home", "open_preview", "cancel_flow", "open_top", "continue_draft"}:
+        return "navigation"
+    if command in {"open_add_bank", "save_bank", "add_item", "select_bank_other", "edit_bank"}:
+        return "primary"
+    if command in {"select_existing_bank", "select_bank_preset", "open_bank", "open_top_category", "pick_item"}:
+        return "choices"
+    if command in {"set_target_month", "change_selected_bank", "toggle_notifications", "set_language", "open_settings", "open_history", "open_help"}:
+        return "utility"
+    return "default"
+
+
+def _build_action_sections(
+    actions: list[dict[str, object]],
+    deps: WebDependencies,
+    language: str,
+) -> list[dict[str, object]]:
+    grouped: dict[str, list[dict[str, object]]] = {}
+    for action in actions:
+        group = str(action.get("group", "default"))
+        grouped.setdefault(group, []).append(action)
+    sections: list[dict[str, object]] = []
+    for group in ACTION_SECTION_ORDER:
+        items = grouped.get(group, [])
+        if not items:
+            continue
+        title_key = ACTION_SECTION_TITLE_KEYS[group]
+        sections.append(
+            {
+                "id": group,
+                "title": deps.localizer.t(title_key, language),
+                "actions": items,
+            }
+        )
+    return sections
+
+
+def _build_flow_summary(
+    deps: WebDependencies,
+    language: str,
+    state: WorkflowState,
+    screen: Screen,
+    telegram_linked: bool,
+) -> dict[str, str]:
+    return {
+        "title": deps.localizer.t("labels.workflow_summary", language),
+        "bank_label": deps.localizer.t("labels.current_bank", language),
+        "bank_value": state.selected_bank_name or deps.localizer.t("labels.not_selected", language),
+        "month_label": deps.localizer.t("labels.current_month", language),
+        "month_value": format_month_label(state.target_month),
+        "items_label": deps.localizer.t("labels.detected_categories", language),
+        "items_value": str(len(state.draft_items)),
+        "next_step_label": deps.localizer.t("labels.next_step", language),
+        "next_step_value": _describe_next_step(deps, language, screen),
+        "telegram_label": deps.localizer.t("labels.linked_accounts", language),
+        "telegram_value": deps.localizer.t(
+            "labels.telegram_linked" if telegram_linked else "labels.telegram_unlinked",
+            language,
+        ),
+    }
+
+
+def _describe_next_step(deps: WebDependencies, language: str, screen: Screen) -> str:
+    if screen.expects_input == "photo_upload":
+        return deps.localizer.t("messages.next_step_upload", language)
+    if screen.expects_input == "manual_lines":
+        return deps.localizer.t("messages.next_step_manual", language)
+    if screen.id == "choose_bank":
+        return deps.localizer.t("messages.next_step_choose_bank", language)
+    if screen.id == "preview":
+        return deps.localizer.t("messages.next_step_review_save", language)
+    if screen.id == "bank_details":
+        return deps.localizer.t("messages.next_step_edit_saved", language)
+    return deps.localizer.t("messages.next_step_navigation", language)
+
+
+def _ensure_mobile_navigation(
+    actions: list[dict[str, object]],
+    deps: WebDependencies,
+    language: str,
+    screen_id: str,
+) -> None:
     has_safe_action = any(str(action.get("command", "")).strip() in {"open_home", "open_preview", "cancel_flow"} for action in actions)
-    if not has_safe_action:
+    if not has_safe_action and screen_id != "home":
         actions.append(
             {
                 "command": "open_home",
@@ -457,7 +565,7 @@ def _ensure_mobile_navigation(actions: list[dict[str, object]], deps: WebDepende
                 "destructive": False,
             }
         )
-    has_primary = any(str(action.get("variant")) == "primary" for action in actions)
+    has_primary = any(str(action.get("group")) == "primary" or str(action.get("variant")) == "primary" for action in actions)
     if not has_primary:
         for action in actions:
             if str(action.get("variant")) != "danger":
@@ -475,6 +583,8 @@ def _build_input_panel(expects_input: str | None, deps: WebDependencies, languag
             "submit_label": deps.localizer.t("buttons.upload_photo", language),
             "accept": "image/*",
             "hint": deps.localizer.t("messages.upload_hint", language),
+            "supporting_text": deps.localizer.t("messages.upload_hint", language),
+            "filename_label": deps.localizer.t("labels.selected_file", language),
         }
     if expects_input == "manual_lines":
         return {
@@ -483,6 +593,7 @@ def _build_input_panel(expects_input: str | None, deps: WebDependencies, languag
             "submit_label": deps.localizer.t("buttons.send_input", language),
             "placeholder": deps.localizer.t("labels.manual_input_placeholder", language),
             "inputmode": "text",
+            "supporting_text": deps.localizer.t("messages.manual_input_hint", language),
         }
     if expects_input == "item_percent":
         return {
@@ -491,6 +602,7 @@ def _build_input_panel(expects_input: str | None, deps: WebDependencies, languag
             "submit_label": deps.localizer.t("buttons.send_input", language),
             "placeholder": deps.localizer.t("labels.percent_input_placeholder", language),
             "inputmode": "decimal",
+            "supporting_text": deps.localizer.t("messages.percent_input_hint", language),
         }
     return {
         "kind": "text",
@@ -498,6 +610,7 @@ def _build_input_panel(expects_input: str | None, deps: WebDependencies, languag
         "submit_label": deps.localizer.t("buttons.send_input", language),
         "placeholder": deps.localizer.t("labels.text_input_placeholder", language),
         "inputmode": "text",
+        "supporting_text": deps.localizer.t("messages.text_input_hint", language),
     }
 
 
@@ -506,7 +619,19 @@ def _paginate_actions(actions: list[Action], limit: int) -> tuple[list[Action], 
         return actions, False, limit
     if len(actions) <= limit:
         return actions, False, limit
-    return actions[:limit], True, limit + DEFAULT_ACTIONS_LIMIT
+    pinned = [action for action in actions if action.command in PINNED_ACTION_COMMANDS]
+    regular = [action for action in actions if action.command not in PINNED_ACTION_COMMANDS]
+    visible_regular_limit = max(limit - len(pinned), 0)
+    visible: list[Action] = list(regular[:visible_regular_limit])
+    for action in pinned:
+        if len(visible) >= limit:
+            break
+        visible.append(action)
+    for action in regular[visible_regular_limit:]:
+        if len(visible) >= limit:
+            break
+        visible.append(action)
+    return visible, len(actions) > len(visible), limit + DEFAULT_ACTIONS_LIMIT
 
 
 def _parse_actions_limit(raw: str | None) -> int:
@@ -527,9 +652,9 @@ def _parse_payload(payload_raw: str) -> dict[str, object]:
     return data if isinstance(data, dict) else {}
 
 
-def _persist_workflow(request: Request, result: WorkflowResult) -> None:
+async def _persist_workflow(request: Request, deps: WebDependencies, result: WorkflowResult) -> None:
     _persist_authenticated_user(request, result.user.id)
-    request.session[SESSION_STATE_KEY] = result.state.to_dict()
+    await deps.facade.save_workflow_state(user_id=result.user.id, state=result.state)
     request.session[SESSION_SCREEN_KEY] = _serialize_screen(result.screen)
 
 
@@ -555,11 +680,6 @@ def _get_user_id_from_session(request: Request) -> int | None:
     if isinstance(raw, str) and raw.isdigit():
         return int(raw)
     return None
-
-
-def _get_state_from_session(request: Request) -> WorkflowState:
-    raw = request.session.get(SESSION_STATE_KEY)
-    return WorkflowState.from_dict(raw) if isinstance(raw, dict) else WorkflowState()
 
 
 def _get_screen_from_session(request: Request) -> Screen | None:
@@ -646,6 +766,26 @@ def _render_landing(
         "language": language,
         "title": "Cashback Analyzer",
         "subtitle": deps.localizer.t("messages.web_auth_hint", language),
+        "landing_eyebrow": deps.localizer.t("labels.landing_eyebrow", language),
+        "landing_points": [
+            deps.localizer.t("messages.landing_feature_capture", language),
+            deps.localizer.t("messages.landing_feature_months", language),
+            deps.localizer.t("messages.landing_feature_channels", language),
+        ],
+        "landing_steps_title": deps.localizer.t("labels.workflow_steps", language),
+        "landing_steps": [
+            deps.localizer.t("messages.workflow_step_capture", language),
+            deps.localizer.t("messages.workflow_step_review", language),
+            deps.localizer.t("messages.workflow_step_save", language),
+        ],
+        "login_title": deps.localizer.t("labels.login_title", language),
+        "register_title": deps.localizer.t("labels.register_title", language),
+        "username_placeholder": deps.localizer.t("labels.username_placeholder", language),
+        "password_placeholder": deps.localizer.t("labels.password_placeholder", language),
+        "display_name_placeholder": deps.localizer.t("labels.display_name_placeholder", language),
+        "email_placeholder": deps.localizer.t("labels.email_placeholder", language),
+        "login_button_label": deps.localizer.t("buttons.login", language),
+        "create_account_label": deps.localizer.t("buttons.create_account", language),
         "telegram_enabled": deps.telegram_auth_enabled,
         "bot_username": deps.bot_username,
         "auth_url": _telegram_callback_url(deps),

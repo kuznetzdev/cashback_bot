@@ -1,28 +1,19 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import logging
 from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
-from aiogram import Bot, Dispatcher
-from aiogram.exceptions import TelegramNetworkError, TelegramServerError, TelegramUnauthorizedError
-from aiogram.fsm.storage.memory import MemoryStorage
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from app.adapters.scheduler import ReminderLoop
-from app.adapters.telegram.reminder_sender import TelegramReminderSender
-from app.adapters.telegram.renderer import TelegramScreenRenderer
-from app.adapters.telegram.router import TelegramDependencies, build_router
-from app.adapters.system import NoopReminderSender
-from app.adapters.web.app import WebDependencies, create_web_app
-from app.adapters.web.server import run_web_server
-from app.application import ApplicationFacade
+from app.application.facade import ApplicationFacade
 from app.bootstrap.config import Settings, get_settings
-from app.bootstrap.container import build_application_facade, build_core_container
+from app.bootstrap.container import CoreContainer, build_application_facade, build_core_container
 from app.bootstrap.db_startup import ensure_database_exists
 from app.bootstrap.logger import configure_logging
 from app.i18n.localizer import Localizer
@@ -55,27 +46,44 @@ async def run_app() -> None:
         retry_delay=settings.migration_retry_delay,
     )
 
+    reminder_provider = _normalized_reminder_delivery_provider(settings)
     tasks: list[asyncio.Task[None]] = []
-    telegram_facade = None
+    telegram_bot = None
+    if _telegram_bot_runtime_required(settings, reminder_provider):
+        aiogram_module = importlib.import_module("aiogram")
+        telegram_bot = aiogram_module.Bot(token=settings.bot_token)
+    shared_facade = _build_runtime_facade(
+        core=core,
+        localizer=localizer,
+        telegram_bot=telegram_bot,
+        reminder_provider=reminder_provider,
+    )
+    if _reminder_delivery_runtime_enabled(reminder_provider):
+        tasks.append(
+            asyncio.create_task(
+                _run_reminder_runtime(facade=shared_facade),
+                name="reminder-runtime",
+            )
+        )
     if settings.app_enable_telegram:
-        bot = Bot(token=settings.bot_token)
-        reminder_sender = TelegramReminderSender(bot=bot, localizer=localizer)
-        telegram_facade = build_application_facade(core, reminder_sender)
+        if telegram_bot is None:
+            raise RuntimeError("Telegram bot runtime must be initialized before starting the Telegram adapter.")
         tasks.append(
             asyncio.create_task(
                 _run_telegram_adapter(
                     settings=settings,
-                    bot=bot,
-                    facade=telegram_facade,
+                    bot=telegram_bot,
+                    facade=shared_facade,
                     localizer=localizer,
                 ),
                 name="telegram-adapter",
             )
         )
     if settings.app_enable_web:
-        web_facade = telegram_facade or build_application_facade(core, NoopReminderSender())
-        web_deps = WebDependencies(
-            facade=web_facade,
+        web_app_module = importlib.import_module("app.adapters.web.app")
+        web_server_module = importlib.import_module("app.adapters.web.server")
+        web_deps = web_app_module.WebDependencies(
+            facade=shared_facade,
             localizer=localizer,
             default_language=settings.lang_default,
             temp_dir=settings.temp_dir,
@@ -87,10 +95,10 @@ async def run_app() -> None:
             secure_cookies=settings.web_secure_cookies,
             session_secret=settings.web_session_secret,
         )
-        web_app = create_web_app(web_deps)
+        web_app = web_app_module.create_web_app(web_deps)
         tasks.append(
             asyncio.create_task(
-                run_web_server(
+                web_server_module.run_web_server(
                     web_app,
                     host=settings.web_host,
                     port=settings.web_port,
@@ -101,9 +109,10 @@ async def run_app() -> None:
         )
     try:
         logger.info(
-            "Cashback Analyzer starting (telegram=%s, web=%s)",
+            "Cashback Analyzer starting (telegram_adapter=%s, web_adapter=%s, reminder_provider=%s)",
             settings.app_enable_telegram,
             settings.app_enable_web,
+            reminder_provider or "disabled",
         )
         if len(tasks) == 1:
             await tasks[0]
@@ -119,27 +128,45 @@ async def run_app() -> None:
                 task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+        if telegram_bot is not None:
+            await telegram_bot.session.close()
         await core.engine.dispose()
+
+
+async def _run_reminder_runtime(*, facade) -> None:
+    scheduler_module = importlib.import_module("app.adapters.scheduler")
+    reminder_loop = scheduler_module.ReminderLoop(facade.send_monthly_reminders)
+    reminder_loop.start()
+    try:
+        await asyncio.Event().wait()
+    except asyncio.CancelledError:
+        logger.info("Reminder runtime cancelled")
+        raise
+    finally:
+        await reminder_loop.stop()
 
 
 async def _run_telegram_adapter(
     *,
     settings: Settings,
-    bot: Bot,
-    facade: ApplicationFacade,
+    bot,
+    facade,
     localizer: Localizer,
 ) -> None:
-    dp = Dispatcher(storage=MemoryStorage())
-    renderer = TelegramScreenRenderer(localizer=localizer)
-    telegram_deps = TelegramDependencies(
+    aiogram_module = importlib.import_module("aiogram")
+    memory_storage_module = importlib.import_module("aiogram.fsm.storage.memory")
+    telegram_renderer_module = importlib.import_module("app.adapters.telegram.renderer")
+    telegram_router_module = importlib.import_module("app.adapters.telegram.router")
+
+    dp = aiogram_module.Dispatcher(storage=memory_storage_module.MemoryStorage())
+    renderer = telegram_renderer_module.TelegramScreenRenderer(localizer=localizer)
+    telegram_deps = telegram_router_module.TelegramDependencies(
         facade=facade,
         renderer=renderer,
         localizer=localizer,
         default_language=settings.lang_default,
     )
-    dp.include_router(build_router(telegram_deps))
-    reminder_loop = ReminderLoop(facade.send_monthly_reminders)
-    reminder_loop.start()
+    dp.include_router(telegram_router_module.build_router(telegram_deps))
     try:
         await _run_polling_with_retry(
             dp=dp,
@@ -147,9 +174,7 @@ async def _run_telegram_adapter(
             retry_delay=settings.telegram_retry_delay,
         )
     finally:
-        await reminder_loop.stop()
         await dp.storage.close()
-        await bot.session.close()
 
 
 async def _wait_for_database(engine: AsyncEngine, *, max_attempts: int, retry_delay: float) -> None:
@@ -166,15 +191,17 @@ async def _wait_for_database(engine: AsyncEngine, *, max_attempts: int, retry_de
             await asyncio.sleep(retry_delay)
 
 
-async def _run_polling_with_retry(*, dp: Dispatcher, bot: Bot, retry_delay: float) -> None:
+async def _run_polling_with_retry(*, dp: object, bot: object, retry_delay: float) -> None:
+    telegram_exceptions = importlib.import_module("aiogram.exceptions")
+
     while True:
         try:
             await dp.start_polling(bot)
             return
-        except TelegramUnauthorizedError:
+        except telegram_exceptions.TelegramUnauthorizedError:
             logger.critical("Telegram token is invalid (Unauthorized).")
             raise
-        except (TelegramNetworkError, TelegramServerError) as error:
+        except (telegram_exceptions.TelegramNetworkError, telegram_exceptions.TelegramServerError) as error:
             logger.warning("Telegram polling transient error: %s. Retry in %.1f sec.", error, retry_delay)
             await asyncio.sleep(retry_delay)
 
@@ -202,11 +229,32 @@ def _upgrade_head_sync(database_url: str) -> None:
     command.upgrade(config, "head")
 
 
+def _build_runtime_facade(
+    *,
+    core: CoreContainer,
+    localizer: Localizer,
+    telegram_bot: object | None,
+    reminder_provider: str | None,
+) -> ApplicationFacade:
+    if reminder_provider == "telegram":
+        if telegram_bot is None:
+            raise RuntimeError("Telegram bot runtime must be initialized before creating the telegram reminder sender.")
+        telegram_sender_module = importlib.import_module("app.adapters.telegram.reminder_sender")
+        reminder_sender = telegram_sender_module.TelegramReminderSender(bot=telegram_bot, localizer=localizer)
+    else:
+        system_module = importlib.import_module("app.adapters.system")
+        reminder_sender = system_module.NoopReminderSender()
+    return build_application_facade(core, reminder_sender, delivery_provider=reminder_provider)
+
+
 def _validate_startup_settings(settings: Settings) -> None:
+    reminder_provider = _normalized_reminder_delivery_provider(settings)
+    if reminder_provider not in {None, "telegram"}:
+        raise RuntimeError("REMINDER_DELIVERY_PROVIDER must be empty or 'telegram'.")
     if not settings.app_enable_telegram and not settings.app_enable_web:
         raise RuntimeError("At least one adapter must be enabled (APP_ENABLE_TELEGRAM or APP_ENABLE_WEB).")
     token = settings.bot_token.strip()
-    telegram_token_required = settings.app_enable_telegram or (settings.app_enable_web and settings.web_enable_telegram_auth)
+    telegram_token_required = _telegram_token_required(settings, reminder_provider)
     if telegram_token_required and (
         not token or token.endswith(":TEST_TOKEN") or "replace_me" in token.lower()
     ):
@@ -218,3 +266,27 @@ def _validate_startup_settings(settings: Settings) -> None:
         or settings.web_session_secret.strip() == ""
     ):
         raise RuntimeError("WEB_SESSION_SECRET must be set to a non-default secret when APP_ENABLE_WEB=true.")
+
+
+def _normalized_reminder_delivery_provider(settings: Settings) -> str | None:
+    raw_provider = settings.reminder_delivery_provider
+    if raw_provider is None:
+        return None
+    normalized_provider = raw_provider.strip().lower()
+    return normalized_provider or None
+
+
+def _telegram_token_required(settings: Settings, reminder_provider: str | None) -> bool:
+    return (
+        settings.app_enable_telegram
+        or reminder_provider == "telegram"
+        or (settings.app_enable_web and settings.web_enable_telegram_auth)
+    )
+
+
+def _telegram_bot_runtime_required(settings: Settings, reminder_provider: str | None) -> bool:
+    return settings.app_enable_telegram or reminder_provider == "telegram"
+
+
+def _reminder_delivery_runtime_enabled(reminder_provider: str | None) -> bool:
+    return reminder_provider is not None

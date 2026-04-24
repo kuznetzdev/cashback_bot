@@ -25,7 +25,8 @@ Runtime sequence:
 3. wait for database readiness
 4. run Alembic migrations when enabled
 5. assemble the DI container
-6. start enabled adapters
+6. start runtime-owned reminder scheduling when a reminder delivery provider is configured
+7. start enabled adapters
 
 ## Main Environment Variables
 
@@ -37,6 +38,7 @@ Settings source: `app/bootstrap/config.py`
 - `APP_TIMEZONE`
 - `APP_ENABLE_WEB`
 - `APP_ENABLE_TELEGRAM`
+- `REMINDER_DELIVERY_PROVIDER`
 - `AUTO_CREATE_DB`
 - `AUTO_MIGRATE`
 
@@ -70,41 +72,55 @@ Settings source: `app/bootstrap/config.py`
 
 Operational note:
 
-- `BOT_TOKEN` is required if the Telegram bot adapter is enabled
-- `BOT_TOKEN` and `TELEGRAM_BOT_USERNAME` are also required when web Telegram linking/login is enabled
+- code defaults and `.env.example` now align on web-first local mode
+- `BOT_TOKEN` is required when the Telegram bot adapter is enabled, web Telegram linking/login is enabled, or `REMINDER_DELIVERY_PROVIDER=telegram`
+- `TELEGRAM_BOT_USERNAME` is required only when web Telegram linking/login is enabled
+- `WEB_SESSION_SECRET` defaults to a development-only value and must be overridden for hardened environments
 
 ## Recommended Modes
 
-### Web-first
-
-```env
-APP_ENABLE_WEB=true
-APP_ENABLE_TELEGRAM=false
-WEB_ENABLE_TELEGRAM_AUTH=true
-```
-
-### Telegram-only compatibility mode
-
-```env
-APP_ENABLE_WEB=false
-APP_ENABLE_TELEGRAM=true
-```
-
-### Full hybrid mode
-
-```env
-APP_ENABLE_WEB=true
-APP_ENABLE_TELEGRAM=true
-WEB_ENABLE_TELEGRAM_AUTH=true
-```
-
-### Local web auth only
+### Default local web-first
 
 ```env
 APP_ENABLE_WEB=true
 APP_ENABLE_TELEGRAM=false
 WEB_ENABLE_TELEGRAM_AUTH=false
+REMINDER_DELIVERY_PROVIDER=
 ```
+
+### Web with Telegram login/link
+
+```env
+APP_ENABLE_WEB=true
+APP_ENABLE_TELEGRAM=false
+WEB_ENABLE_TELEGRAM_AUTH=true
+REMINDER_DELIVERY_PROVIDER=
+```
+
+### Telegram-only runtime
+
+```env
+APP_ENABLE_WEB=false
+APP_ENABLE_TELEGRAM=true
+REMINDER_DELIVERY_PROVIDER=telegram
+```
+
+### Single-process hybrid runtime
+
+```env
+APP_ENABLE_WEB=true
+APP_ENABLE_TELEGRAM=true
+WEB_ENABLE_TELEGRAM_AUTH=true
+REMINDER_DELIVERY_PROVIDER=telegram
+```
+
+### Reminder delivery runtime
+
+- monthly reminder scheduling is started by `app/bootstrap/runtime.py`
+- the scheduler is no longer nested under Telegram polling startup
+- reminder ownership is now driven by `REMINDER_DELIVERY_PROVIDER`
+- supported values are empty/disabled and `telegram`
+- in multi-service compose, only one process should own reminder delivery; the bundled compose file assigns it to the Telegram profile service
 
 ## Auth Behavior
 
@@ -118,7 +134,30 @@ WEB_ENABLE_TELEGRAM_AUTH=false
 
 ### Telegram
 
-The bot authenticates through linked external identity lookup and can still create a user on first contact.
+The bot authenticates through the shared external identity use case and can still create a user on first contact.
+
+## Workflow Architecture
+
+Current workflow split:
+
+- `app/application/workflow/dispatcher.py`
+- `app/application/workflow/draft.py`
+- `app/application/workflow/banks.py`
+- `app/application/workflow/navigation.py`
+- `app/application/workflow/text_intents.py`
+- `app/application/workflow/interrupts.py`
+- `app/application/presenters/workflow_screens.py`
+- `app/application/presenters/workflow_formatters.py`
+
+`app/application/use_cases/handle_command.py` remains only as a thin orchestration wrapper over the dispatcher.
+
+Current user-facing behavior worth preserving in tests:
+
+- web home screen accepts screenshot upload immediately
+- Telegram accepts photos even outside the old dedicated photo state
+- OCR/manual parsing drives the user into attach-to-bank flow instead of stopping after recognition
+- if the user has exactly one saved bank, parsed categories auto-attach to that bank draft
+- preview and saved-bank flows are month-aware (`previous`, `current`, `next`)
 
 ## Database Migration
 
@@ -128,6 +167,12 @@ The identity refactor introduces:
 - `users.display_name`
 - `user_identities`
 - `local_credentials`
+- `cashback_items.target_month`
+
+Current compatibility posture after the refactor:
+
+- legacy `users.telegram_user_id`, `username`, and `full_name` remain in schema only as deprecated compatibility fields
+- new runtime writes do not mirror linked Telegram identities back into those columns
 
 Run manually when needed:
 
@@ -143,6 +188,12 @@ Start the stack with:
 
 ```bash
 docker compose up --build
+```
+
+Add Telegram adapter runtime with:
+
+```bash
+docker compose --profile telegram up --build
 ```
 
 Design intent:
@@ -167,10 +218,14 @@ Current regression coverage includes:
 - external identity linking and unlinking
 - repository behavior
 - OCR adapter boundaries
-- reminder routing through linked identities
+- reminder routing through injected delivery providers over linked identities
+- runtime ownership of the reminder loop outside Telegram adapter startup
 - Telegram rendering and routing
 - web adapter behavior
+- month-aware repository behavior
+- attach-after-OCR flow
 - workflow interruption and recovery
+- workflow decomposition boundaries
 
 ## Common Development Tasks
 

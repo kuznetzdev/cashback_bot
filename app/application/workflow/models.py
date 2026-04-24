@@ -43,16 +43,30 @@ class WorkflowState:
     mode: str | None = None
     selected_bank_id: int | None = None
     selected_bank_name: str | None = None
+    target_month: str | None = None
     draft_items: list[CashbackDraftItem] = field(default_factory=list)
     editing_item_index: int | None = None
     pending_input_kind: str | None = None
     temp_payload: dict[str, object] = field(default_factory=dict)
+
+    def is_empty(self) -> bool:
+        return (
+            self.mode is None
+            and self.selected_bank_id is None
+            and self.selected_bank_name is None
+            and self.target_month is None
+            and not self.draft_items
+            and self.editing_item_index is None
+            and self.pending_input_kind is None
+            and not self.temp_payload
+        )
 
     def to_dict(self) -> dict[str, object]:
         return {
             "mode": self.mode,
             "selected_bank_id": self.selected_bank_id,
             "selected_bank_name": self.selected_bank_name,
+            "target_month": self.target_month,
             "draft_items": [self._serialize_item(item) for item in self.draft_items],
             "editing_item_index": self.editing_item_index,
             "pending_input_kind": self.pending_input_kind,
@@ -83,6 +97,7 @@ class WorkflowState:
             mode=_as_str_or_none(data.get("mode")),
             selected_bank_id=_as_int_or_none(data.get("selected_bank_id")),
             selected_bank_name=_as_str_or_none(data.get("selected_bank_name")),
+            target_month=_as_str_or_none(data.get("target_month")),
             draft_items=items,
             editing_item_index=_as_int_or_none(data.get("editing_item_index")),
             pending_input_kind=_as_str_or_none(data.get("pending_input_kind")),

@@ -75,8 +75,20 @@ class TesseractOCRAdapter(OCRPort):
     @staticmethod
     def _ocr(processed_path: Path) -> str:
         with Image.open(processed_path) as image:
-            return pytesseract.image_to_string(
+            primary = pytesseract.image_to_string(
                 image,
                 lang="rus+eng",
                 config="--oem 3 --psm 6 -c preserve_interword_spaces=1",
             )
+            if _has_meaningful_text(primary):
+                return primary
+            return pytesseract.image_to_string(
+                image,
+                lang="rus+eng",
+                config="--oem 3 --psm 11 -c preserve_interword_spaces=1",
+            )
+
+
+def _has_meaningful_text(text: str) -> bool:
+    alnum_count = sum(1 for char in text if char.isalnum())
+    return alnum_count >= 4

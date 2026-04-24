@@ -2,6 +2,16 @@
 
 Date: 2026-03-11
 
+Follow-up note (2026-03-12):
+
+- documentation drift findings from section 8 were resolved in a dedicated documentation synchronization pass
+- the audit remains useful as a record of what was verified and what was true at audit time
+
+Historical snapshot note (2026-03-16):
+
+- this document is a historical audit record, not the active source of truth for current architecture or runtime behavior
+- current truth lives in the code, tests, migrations, configs, and active docs such as `README*`, `docs/ARCHITECTURE.md`, and `docs/DEVELOPMENT.md`
+
 ## 1. Executive summary
 
 ### Overall verdict
