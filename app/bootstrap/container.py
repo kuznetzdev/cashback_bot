@@ -200,7 +200,12 @@ def build_application_facade(core: CoreContainer, reminder_sender: ReminderSende
     log_event = LogEventUseCase(core.uow_factory)
     find_user_by_identity = FindUserByExternalIdentityUseCase(core.uow_factory)
     best_card_for_category = BestCardForCategoryUseCase(core.uow_factory, core.ranking, core.categories)
-    quick_add_bank = QuickAddBankUseCase(core.parser, save_bank_draft)
+    quick_add_bank = QuickAddBankUseCase(
+        core.parser,
+        save_bank_draft,
+        categories=core.categories,
+        uow_factory=core.uow_factory,
+    )
     ranking_snapshot = RankingSnapshotUseCase(core.uow_factory, core.ranking, core.categories)
     handle_command = HandleCommandUseCase(
         uow_factory=core.uow_factory,

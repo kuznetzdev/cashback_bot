@@ -238,6 +238,22 @@ def build_router(deps: TelegramDependencies) -> Router:
                 deps.localizer.t(error.message_key, user.language, error.payload),
             )
             return
+        # Surface batch feedback (multi-bank adds, validation warnings) before
+        # we route into the bank-details screen — otherwise the user never sees
+        # the warnings about unknown categories or suspicious percentages.
+        if result.batch is not None and (result.batch.warnings or len(result.batch.banks) > 1):
+            lines: list[str] = []
+            if result.batch.added:
+                lines.append("✅ Добавлено: " + ", ".join(result.batch.added))
+            if result.batch.updated:
+                lines.append("♻️ Обновлено: " + ", ".join(result.batch.updated))
+            if result.batch.warnings:
+                lines.extend(result.batch.warnings)
+            if lines:
+                try:
+                    await message.answer("\n".join(lines))
+                except Exception as error:  # pragma: no cover - non-critical UX polish
+                    logger.debug("Failed to post quickadd summary: %s", error)
         await _handle_event(
             deps=deps,
             event=message,
