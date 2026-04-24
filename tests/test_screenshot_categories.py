@@ -17,8 +17,11 @@ from app.domain.services.categories import CategoryService
 from app.domain.services.parsing import ParserService
 
 
-# (raw_category_text, expected_slug) — sourced from 7 real screenshots:
-# T-Bank April, T-Bank "В Городе", SberPrime, Yandex Plus, MTS, VTB, MTS WEEKEND.
+# (raw_category_text, expected_slug) — sourced from 11 real/representative
+# screenshots: T-Bank April, T-Bank "В Городе", SberPrime, Yandex Plus, MTS,
+# VTB, MTS WEEKEND, plus 4 synthetic bank UIs (Город Банк, Нова Банк, Орбита
+# Банк, Север Банк) modelled on how Russian bank apps actually render
+# cashback tiles in 2025.
 SCREENSHOT_CATEGORY_CASES: list[tuple[str, str]] = [
     # T-Bank April
     ("Дом и ремонт", "home_goods"),
@@ -53,6 +56,27 @@ SCREENSHOT_CATEGORY_CASES: list[tuple[str, str]] = [
     ("Театры и концерты", "theatre"),
     ("Книги", "books"),
     ("за всё", "all_purchases"),
+    # Город Банк — "Повышенный кэшбэк" (select 3 of 5)
+    ("Маркетплейсы", "marketplaces"),
+    ("Развлечения", "entertainment"),
+    ("Одежда", "clothing"),
+    ("Путешествия", "travel"),
+    # Нова Банк — "Ваш кэшбэк на май"
+    ("Онлайн-покупки", "marketplaces"),
+    ("Маркетплейсы и интернет-магазины", "marketplaces"),
+    ("Красота", "beauty"),
+    ("Салоны красоты и косметика", "beauty"),
+    # Орбита Банк — "Любимые категории"
+    ("Продукты", "supermarkets"),
+    ("Детские товары", "children_goods"),
+    ("АЗС", "fuel"),
+    ("Электроника", "electronics"),
+    # Север Банк — "Категории кэшбэка"
+    ("Продукты и товары для дома", "supermarkets"),
+    ("Топливо и автосервисы", "fuel"),
+    ("Лекарства и товары для здоровья", "pharmacy"),
+    ("Такси", "transport"),
+    ("Кафе и рестораны", "restaurants"),
 ]
 
 
