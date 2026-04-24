@@ -18,3 +18,10 @@ ocr_tmp/
 cashback.db
 merged_code*
 объединить.py
+# Local IDE / Claude Code artifacts — per-developer, not for the repo.
+.claude/
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
