@@ -89,7 +89,7 @@ def _build_openai_vision(settings: Settings) -> OpenAIVisionOCRAdapter:
     )
 
 
-def _build_ocr_adapter(settings: Settings) -> OCRPort:
+def _build_ocr_adapter(settings: Settings, *, parser: ParserService | None = None) -> OCRPort:
     raw_provider = (settings.ocr_provider or "auto").strip().lower()
     try:
         provider = OCRProvider(raw_provider)
@@ -127,12 +127,26 @@ def _build_ocr_adapter(settings: Settings) -> OCRPort:
         logger.warning("OpenAI vision unavailable, running tesseract-only: %s", error)
         return tesseract
 
+    content_validator: Callable[[str], bool] | None = None
+    if parser is not None:
+        # Tesseract can return text that looks plausible but contains zero
+        # parseable cashback lines (compressed screenshots, stylised fonts).
+        # In that case the composite adapter should still try the vision
+        # fallback rather than leave the user with an errors.ocr_empty.
+        def _has_parseable_offers(text: str) -> bool:
+            try:
+                return bool(parser.parse_ocr_text(text))
+            except Exception:  # pragma: no cover - defensive
+                return False
+
+        content_validator = _has_parseable_offers
+
     logger.info(
         "OCR provider: composite (auto: tesseract → openai-vision on failure, model=%s, base_url=%s)",
         settings.openai_model,
         settings.openai_base_url or "default",
     )
-    return CompositeOCRAdapter(primary=tesseract, fallback=vision)
+    return CompositeOCRAdapter(primary=tesseract, fallback=vision, content_validator=content_validator)
 
 
 def build_core_container(settings: Settings) -> CoreContainer:
@@ -147,7 +161,7 @@ def build_core_container(settings: Settings) -> CoreContainer:
     categories = CategoryService()
     parser = ParserService(categories)
     ranking = RankingService(categories)
-    ocr = _build_ocr_adapter(settings)
+    ocr = _build_ocr_adapter(settings, parser=parser)
     clock = SystemClock(settings.app_timezone)
     return CoreContainer(
         settings=settings,
