@@ -316,7 +316,10 @@ def create_web_app(deps: WebDependencies) -> FastAPI:
         db_status = await _check_db(deps)
         telegram_status = await _check_telegram(deps)
         ocr_status = deps.ocr_provider_name or "n/a"
-        degraded = db_status != "ok" or telegram_status == "error"
+        # "n/a" means the probe isn't wired (e.g. web-only deployment without
+        # a bot handle), not that the subsystem is down. Only treat "error"
+        # as an actual degradation signal.
+        degraded = db_status == "error" or telegram_status == "error"
         payload = {
             "status": "ok" if not degraded else "degraded",
             "db": db_status,
