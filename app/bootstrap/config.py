@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -51,6 +52,39 @@ class Settings(BaseSettings):
     web_max_upload_size: int = Field(default=5 * 1024 * 1024, alias="WEB_MAX_UPLOAD_SIZE", ge=1024)
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     temp_dir: Path = Field(default=Path("ocr_tmp"), alias="TEMP_DIR")
+
+    # FSM storage — memory loses state on restart; Redis persists across deploys
+    # and OOM-kills. The URL must be provided when fsm_storage=redis.
+    redis_url: str | None = Field(default=None, alias="REDIS_URL")
+    fsm_storage: Literal["memory", "redis"] = Field(default="memory", alias="FSM_STORAGE")
+
+    # Webhook mode — required for scalable production. In polling mode the bot
+    # holds a long-lived connection to api.telegram.org, which doesn't scale
+    # horizontally. Webhook mode receives updates via HTTPS POST from Telegram.
+    webhook_enabled: bool = Field(default=False, alias="WEBHOOK_ENABLED")
+    webhook_path: str = Field(default="/bot/webhook", alias="WEBHOOK_PATH")
+    webhook_secret: str = Field(default="", alias="WEBHOOK_SECRET")
+
+    # Security / ops
+    cors_origins: list[str] = Field(default_factory=lambda: ["*"], alias="CORS_ORIGINS")
+    metrics_token: str = Field(default="", alias="METRICS_TOKEN")
+    api_rate_limit_per_minute: int = Field(
+        default=60, alias="API_RATE_LIMIT_PER_MINUTE", ge=1, le=10000
+    )
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def _parse_cors_origins(cls, value: object) -> object:
+        # Allow both comma-separated strings and proper JSON lists so .env files
+        # don't need JSON syntax for a simple origin list.
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return ["*"]
+            if stripped.startswith("["):
+                return value
+            return [item.strip() for item in stripped.split(",") if item.strip()]
+        return value
 
     model_config = SettingsConfigDict(
         env_file=".env",

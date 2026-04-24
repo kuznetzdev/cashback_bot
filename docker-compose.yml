@@ -17,6 +17,20 @@ services:
       retries: 10
       start_period: 5s
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 3s
+
   bot:
     build:
       context: .
@@ -24,10 +38,14 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       BOT_TOKEN: ${BOT_TOKEN:-123456:TEST_TOKEN}
       TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-cashback_analyzer_bot}
       POSTGRES_HOST: db
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      FSM_STORAGE: ${FSM_STORAGE:-redis}
       POSTGRES_PORT: 5432
       POSTGRES_DB: ${POSTGRES_DB:-cashback_bot}
       POSTGRES_USER: ${POSTGRES_USER:-cashback_user}
@@ -71,12 +89,21 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     ports:
       - "${WEB_PORT:-8080}:8080"
     environment:
       BOT_TOKEN: ${BOT_TOKEN:-123456:TEST_TOKEN}
       TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-cashback_analyzer_bot}
       POSTGRES_HOST: db
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      FSM_STORAGE: ${FSM_STORAGE:-redis}
+      WEBHOOK_ENABLED: ${WEBHOOK_ENABLED:-false}
+      WEBHOOK_PATH: ${WEBHOOK_PATH:-/bot/webhook}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
       POSTGRES_PORT: 5432
       POSTGRES_DB: ${POSTGRES_DB:-cashback_bot}
       POSTGRES_USER: ${POSTGRES_USER:-cashback_user}
@@ -115,3 +142,4 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:

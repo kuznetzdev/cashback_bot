@@ -9,6 +9,7 @@ from alembic import command
 from alembic.config import Config
 from aiogram import Bot, Dispatcher
 from aiogram.exceptions import TelegramNetworkError, TelegramServerError, TelegramUnauthorizedError
+from aiogram.fsm.storage.base import BaseStorage
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand
 from sqlalchemy import text
@@ -184,7 +185,7 @@ async def _run_telegram_adapter(
     facade: ApplicationFacade,
     localizer: Localizer,
 ) -> None:
-    dp = Dispatcher(storage=MemoryStorage())
+    dp = Dispatcher(storage=build_fsm_storage(settings))
     renderer = TelegramScreenRenderer(localizer=localizer)
     telegram_deps = TelegramDependencies(
         facade=facade,
@@ -281,6 +282,34 @@ def _upgrade_head_sync(database_url: str) -> None:
     config = Config(str(alembic_ini))
     config.set_main_option("sqlalchemy.url", database_url)
     command.upgrade(config, "head")
+
+
+def build_fsm_storage(settings: Settings) -> BaseStorage:
+    """Select aiogram FSM storage based on settings.
+
+    Redis is preferred in production so per-user wizard progress survives bot
+    restarts. Memory storage is fine locally and in tests but loses state on
+    every deploy / crash. If ``FSM_STORAGE=redis`` but ``REDIS_URL`` is unset
+    we fall back to memory with a loud warning rather than crashing, so the bot
+    still boots in a degraded but usable mode.
+    """
+    storage_kind = settings.fsm_storage
+    if storage_kind == "redis":
+        redis_url = (settings.redis_url or "").strip()
+        if not redis_url:
+            logger.warning(
+                "FSM_STORAGE=redis but REDIS_URL is empty — falling back to MemoryStorage."
+            )
+            return MemoryStorage()
+        # Imported lazily so installations without the redis extra still run
+        # with MemoryStorage.
+        from aiogram.fsm.storage.redis import RedisStorage
+
+        storage = RedisStorage.from_url(redis_url, key_prefix="cashback_fsm:")
+        logger.info("FSM storage: redis (%s)", redis_url)
+        return storage
+    logger.info("FSM storage: memory")
+    return MemoryStorage()
 
 
 def _validate_startup_settings(settings: Settings) -> None:
