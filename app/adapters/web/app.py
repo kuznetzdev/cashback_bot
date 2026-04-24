@@ -71,6 +71,7 @@ def create_web_app(deps: WebDependencies) -> FastAPI:
     # and OCR adapters can increment them without a module-level global.
     app.state.metrics = _build_metrics_registry()
     app.add_middleware(_SecurityHeadersMiddleware)
+    app.add_middleware(_CorrelationIdMiddleware)
     app.add_middleware(_RateLimitMiddleware, deps=deps)
     from fastapi.middleware.cors import CORSMiddleware
 
@@ -814,6 +815,26 @@ class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "no-referrer")
+        return response
+
+
+class _CorrelationIdMiddleware(BaseHTTPMiddleware):
+    """Sets ``correlation_id_var`` from the X-Request-Id header (or a fresh
+    uuid4 if missing) so every log line emitted during a request shares
+    the same trace token. The chosen id is echoed back on the response."""
+
+    async def dispatch(self, request: Request, call_next):  # type: ignore[override]
+        import uuid
+
+        from app.bootstrap.correlation import correlation_id_var
+
+        cid = (request.headers.get("x-request-id") or "").strip() or str(uuid.uuid4())[:8]
+        token = correlation_id_var.set(cid)
+        try:
+            response = await call_next(request)
+        finally:
+            correlation_id_var.reset(token)
+        response.headers.setdefault("X-Request-Id", cid)
         return response
 
 
