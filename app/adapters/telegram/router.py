@@ -19,6 +19,11 @@ from app.adapters.telegram.deep_links import (
     PAYLOAD_TOP,
 )
 from app.adapters.telegram.inline import InlineDependencies, handle_inline_query
+from app.adapters.telegram.middleware import (
+    LoggingMiddleware,
+    ThrottlingMiddleware,
+    UserContextMiddleware,
+)
 from app.adapters.telegram.rate_limit import TokenBucketRateLimiter
 from app.adapters.telegram.renderer import TelegramScreenRenderer
 from app.adapters.telegram.state import load_workflow_state, save_workflow_state
@@ -43,10 +48,41 @@ class TelegramDependencies:
     # Photo uploads invoke OCR (and possibly a billed AI call); throttle them.
     # Default: 5 photos burst, sustained at 1 photo every 10 seconds.
     photo_rate_limiter: TokenBucketRateLimiter | None = None
+    # Global per-user message limit — 30/min with burst 30 by default so
+    # normal multi-step interactions aren't disrupted but an abusive client
+    # can't hammer the bot at thousands of updates per minute.
+    global_throttle_capacity: int = 30
+    global_throttle_refill_per_second: float = 0.5
+    # Prometheus metrics registry (opt-in). When present LoggingMiddleware
+    # emits counter + histogram values alongside its log records.
+    metrics: object | None = None
 
 
 def build_router(deps: TelegramDependencies) -> Router:
     router = Router(name="cashback_analyzer")
+
+    # Register middleware on both message and callback_query chains. Order
+    # matters: UserContext and Logging must run before Throttling so the
+    # correlation id / user id are attached to the log record even when we
+    # decide to short-circuit the handler call.
+    logging_mw = LoggingMiddleware(metrics=deps.metrics)
+    user_ctx_mw = UserContextMiddleware()
+    throttling_mw = ThrottlingMiddleware(
+        capacity=deps.global_throttle_capacity,
+        refill_per_second=deps.global_throttle_refill_per_second,
+        notify_text=(
+            deps.localizer.t("errors.rate_limited", deps.default_language)
+            if deps.localizer.has_key("errors.rate_limited", deps.default_language)
+            else "⏳ Подождите немного — слишком много запросов."
+        ),
+    )
+    for observer in (router.message, router.callback_query, router.inline_query):
+        observer.middleware(logging_mw)
+        observer.middleware(user_ctx_mw)
+    # Throttle messages and callbacks; inline queries are already low-cost
+    # (pure read) so we let them through to preserve autocomplete UX.
+    router.message.middleware(throttling_mw)
+    router.callback_query.middleware(throttling_mw)
 
     @router.message(CommandStart())
     async def on_start(message: Message, state: FSMContext, command: CommandObject) -> None:

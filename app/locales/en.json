@@ -128,7 +128,8 @@
     "identity_not_found": "Linked identity was not found.",
     "last_identity_unlink_forbidden": "Add local credentials before unlinking the last external identity.",
     "quickadd_usage": "Usage: /quickadd <bank>: <category> <percent>%, ...\nExample: /quickadd Tinkoff: Fuel 5%, Restaurants 3%",
-    "photo_rate_limited": "Too many photos too quickly. Please wait a moment and try again."
+    "photo_rate_limited": "Too many photos too quickly. Please wait a moment and try again.",
+    "rate_limited": "⏳ Please wait — too many requests in a short time."
   },
   "commands": {
     "start": "Start the bot",
