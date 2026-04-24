@@ -1,10 +1,38 @@
 from __future__ import annotations
 
+import hashlib
+import logging
+
 from app.application.models import Action, UserCommand
 from app.domain.errors import ValidationError
 
+logger = logging.getLogger(__name__)
+
+# Telegram's hard cap on callback_data. Exceeding it makes the whole inline
+# button silently inert — users tap and nothing happens. We must either stay
+# under the limit or fail loudly at encode time so the bug is obvious in tests.
+_CALLBACK_DATA_MAX_BYTES = 64
+
 
 def encode_action(action: Action) -> str:
+    encoded = _encode_action_raw(action)
+    if len(encoded.encode("utf-8")) <= _CALLBACK_DATA_MAX_BYTES:
+        return encoded
+    # Fallback: replace the variable suffix with a short hash alias so the
+    # button still works. The decoder doesn't understand this alias, so we log
+    # a warning — in practice this should only fire for user-supplied slugs
+    # that escape CategoryService's truncation (e.g. manually-edited DB rows).
+    logger.warning(
+        "Callback data exceeds %s bytes for command=%s; emitting hash alias",
+        _CALLBACK_DATA_MAX_BYTES,
+        action.command,
+    )
+    prefix = encoded.rsplit(":", 1)[0]
+    alias = hashlib.sha1(encoded.encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
+    return f"{prefix}:{alias}"
+
+
+def _encode_action_raw(action: Action) -> str:
     command = action.command
     payload = action.payload
     if command == "open_home":

@@ -6,17 +6,26 @@ from dataclasses import dataclass
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.filters import CommandStart
+from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineQuery, Message
 
 from app.adapters.telegram.callbacks import decode_callback
+from app.adapters.telegram.deep_links import (
+    PAYLOAD_ADD_BANK,
+    PAYLOAD_HELP,
+    PAYLOAD_INLINE,
+    PAYLOAD_INLINE_SETUP,
+    PAYLOAD_TOP,
+)
+from app.adapters.telegram.inline import InlineDependencies, handle_inline_query
+from app.adapters.telegram.rate_limit import TokenBucketRateLimiter
 from app.adapters.telegram.renderer import TelegramScreenRenderer
 from app.adapters.telegram.state import load_workflow_state, save_workflow_state
 from app.application import ApplicationFacade
 from app.application.auth.models import ExternalIdentityContext
 from app.application.dto.media import ImageUpload
-from app.application.models import Effect, UserCommand
+from app.application.models import Action, Effect, UserCommand
 from app.domain.errors import DomainError
 from app.domain.models import UserAccount
 from app.i18n.localizer import Localizer
@@ -30,18 +39,24 @@ class TelegramDependencies:
     renderer: TelegramScreenRenderer
     localizer: Localizer
     default_language: str
+    bot_username: str | None = None
+    # Photo uploads invoke OCR (and possibly a billed AI call); throttle them.
+    # Default: 5 photos burst, sustained at 1 photo every 10 seconds.
+    photo_rate_limiter: TokenBucketRateLimiter | None = None
 
 
 def build_router(deps: TelegramDependencies) -> Router:
     router = Router(name="cashback_analyzer")
 
     @router.message(CommandStart())
-    async def on_start(message: Message, state: FSMContext) -> None:
+    async def on_start(message: Message, state: FSMContext, command: CommandObject) -> None:
+        payload = (command.args or "").strip().lower()
+        start_command = _resolve_start_payload(payload)
         await _handle_event(
             deps=deps,
             event=message,
             state=state,
-            command=UserCommand(name="start"),
+            command=start_command,
             log_action="user_started",
             reset_state=False,
         )
@@ -71,6 +86,20 @@ def build_router(deps: TelegramDependencies) -> Router:
             await deps.renderer.notify_error(
                 message,
                 deps.localizer.t("errors.send_photo_or_text", user.language),
+                actions=[_home_action()],
+                language=user.language,
+            )
+            return
+
+        # Photo uploads trigger OCR and potentially a billed AI call. Throttle
+        # them per-user to defend against both accidental spam (user taps the
+        # attach button multiple times) and malicious burn-down attempts.
+        if deps.photo_rate_limiter is not None and not deps.photo_rate_limiter.allow(user.id):
+            await deps.renderer.notify_error(
+                message,
+                deps.localizer.t("errors.photo_rate_limited", user.language),
+                actions=[_home_action()],
+                language=user.language,
             )
             return
 
@@ -121,6 +150,65 @@ def build_router(deps: TelegramDependencies) -> Router:
                 except TelegramBadRequest as error:
                     logger.debug("Failed to delete temporary status message: %s", error)
 
+    @router.message(Command("best"))
+    async def on_best_command(message: Message, state: FSMContext, command: CommandObject) -> None:
+        query = (command.args or "").strip()
+        if not query:
+            # `/best` without an argument → show the full ranking, so the user
+            # can tap any leader from the menu.
+            await _handle_event(
+                deps=deps,
+                event=message,
+                state=state,
+                command=UserCommand(name="open_top"),
+            )
+            return
+        # BestCardForCategoryUseCase inside navigation normalizes the raw query,
+        # so slash commands and free-form text follow the same path.
+        await _handle_event(
+            deps=deps,
+            event=message,
+            state=state,
+            command=UserCommand(name="open_top_category", payload={"slug": query}),
+        )
+
+    @router.message(Command("quickadd"))
+    async def on_quickadd_command(message: Message, state: FSMContext, command: CommandObject) -> None:
+        payload = (command.args or "").strip()
+        user = await _sync_user_only(deps, message)
+        if not payload:
+            await deps.renderer.notify_error(
+                message,
+                deps.localizer.t("errors.quickadd_usage", user.language),
+            )
+            return
+        try:
+            result = await deps.facade.quick_add_bank(user_id=user.id, payload=payload)
+        except DomainError as error:
+            await deps.renderer.notify_error(
+                message,
+                deps.localizer.t(error.message_key, user.language, error.payload),
+            )
+            return
+        await _handle_event(
+            deps=deps,
+            event=message,
+            state=state,
+            command=UserCommand(name="open_bank", payload={"id": result.bank_id}),
+            known_user=user,
+            reset_state=True,
+        )
+
+    @router.inline_query()
+    async def on_inline(query: InlineQuery) -> None:
+        inline_deps = InlineDependencies(
+            facade=deps.facade,
+            localizer=deps.localizer,
+            default_language=deps.default_language,
+            bot_username=deps.bot_username,
+        )
+        await handle_inline_query(query, inline_deps)
+
     @router.message(F.text)
     async def on_text(message: Message, state: FSMContext) -> None:
         text = message.text or ""
@@ -162,7 +250,12 @@ async def _handle_event(
             payload={"error_key": error.message_key, "command": command.name},
         )
         await _answer_callback_safely(event)
-        await deps.renderer.notify_error(event, deps.localizer.t(error.message_key, language, error.payload))
+        await deps.renderer.notify_error(
+            event,
+            deps.localizer.t(error.message_key, language, error.payload),
+            actions=_recovery_actions(error.message_key, command),
+            language=language,
+        )
     except RuntimeError as error:
         logger.exception("Runtime error while handling event: %s", error)
         await _safe_log_event(
@@ -172,7 +265,12 @@ async def _handle_event(
             payload={"command": command.name, "details": str(error)},
         )
         await _answer_callback_safely(event)
-        await deps.renderer.notify_error(event, deps.localizer.t("errors.unexpected", language))
+        await deps.renderer.notify_error(
+            event,
+            deps.localizer.t("errors.unexpected", language),
+            actions=[_home_action()],
+            language=language,
+        )
     except OSError as error:
         logger.exception("I/O error while handling event: %s", error)
         await _safe_log_event(
@@ -182,7 +280,12 @@ async def _handle_event(
             payload={"command": command.name, "details": str(error)},
         )
         await _answer_callback_safely(event)
-        await deps.renderer.notify_error(event, deps.localizer.t("errors.unexpected", language))
+        await deps.renderer.notify_error(
+            event,
+            deps.localizer.t("errors.unexpected", language),
+            actions=[_home_action()],
+            language=language,
+        )
     except Exception as error:
         logger.exception("Unhandled error while handling event: %s", error)
         await _safe_log_event(
@@ -192,7 +295,52 @@ async def _handle_event(
             payload={"command": command.name, "details": str(error)},
         )
         await _answer_callback_safely(event)
-        await deps.renderer.notify_error(event, deps.localizer.t("errors.unexpected", language))
+        await deps.renderer.notify_error(
+            event,
+            deps.localizer.t("errors.unexpected", language),
+            actions=[_home_action()],
+            language=language,
+        )
+
+
+# Deep-link payloads emitted by inline mode / onboarding CTAs: route the user
+# straight into the relevant flow so "Open bot" from a chat stub isn't just
+# "here's the home screen". Payload strings live in ``deep_links`` so both
+# sides (inline handler that produces, router that consumes) stay in sync.
+_START_PAYLOAD_MAP = {
+    PAYLOAD_INLINE: UserCommand(name="start"),
+    PAYLOAD_INLINE_SETUP: UserCommand(name="open_add_bank"),
+    PAYLOAD_ADD_BANK: UserCommand(name="open_add_bank"),
+    PAYLOAD_TOP: UserCommand(name="open_top"),
+    PAYLOAD_HELP: UserCommand(name="open_help"),
+}
+
+
+def _resolve_start_payload(payload: str) -> UserCommand:
+    return _START_PAYLOAD_MAP.get(payload, UserCommand(name="start"))
+
+
+# Errors after which offering the user a "try again" button is useful. Distinct
+# from ``ocr_composite._ESCALATABLE_ERROR_KEYS`` (which decides when the AI
+# fallback runs automatically): here we're deciding whether the user should see
+# a retry CTA in the error message — ``broken_image`` qualifies because the
+# user can upload a different file, even though a second OCR pass wouldn't help.
+_OCR_RETRYABLE_KEYS = frozenset({"errors.ocr_timeout", "errors.ocr_empty", "errors.broken_image"})
+
+
+def _home_action() -> Action:
+    return Action(command="open_home", label_key="buttons.home")
+
+
+def _recovery_actions(error_key: str, command: UserCommand) -> list[Action]:
+    """Build an inline keyboard that always gives the user a way back.
+    OCR / upload failures additionally offer a direct "retry with another
+    method" escape so the flow can continue without restarting from scratch."""
+    actions: list[Action] = []
+    if error_key in _OCR_RETRYABLE_KEYS or command.name == "submit_uploaded_image":
+        actions.append(Action(command="open_add_bank", label_key="buttons.try_again"))
+    actions.append(_home_action())
+    return actions
 
 
 async def _sync_user_only(

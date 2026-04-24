@@ -39,14 +39,42 @@ The long-term product direction is documented in [docs/PRODUCT_OVERVIEW.md](C:\U
 ## What The System Does
 
 - Syncs Telegram users on `/start` or Telegram web login.
-- Collects cashback categories from screenshots via OCR.
-- Accepts manual category input and template-based draft creation.
-- Normalizes categories across RU/EN synonyms.
+- Collects cashback categories from bank-app screenshots through a tiered OCR pipeline (local Tesseract first; OpenAI-compatible vision LLM as a fallback only when Tesseract returned nothing or timed out).
+- Accepts manual category input, `/quickadd <bank>: cat1 N%, cat2 M%…` one-line submissions, and template-based draft creation.
+- Normalizes 20+ categories across RU/EN synonyms and common bank qualifiers ("в Городе", "с МТС Premium", "со СберПрайм"), with fuzzy typo-resilience.
 - Lets the user edit draft and saved bank data.
+- Answers "which card for X?" from three entry points that share one use case:
+  - Telegram **inline mode** (`@cashback_bot <category>` from any chat);
+  - slash command `/best <category>`;
+  - free-form text ("где лучше рестораны").
+- Exposes the same query on the web as `GET /api/best?q=<category>` for scripting / mobile clients.
 - Builds category leaders, global bank ranking, and best-bank answers.
 - Stores action history in `user_logs`.
 - Sends monthly reminders to users with enabled notifications.
 - Runs Telegram and web adapters independently through feature flags.
+
+## Telegram Commands
+
+The bot advertises its command menu via `set_my_commands` on startup:
+
+| Command | Purpose |
+| --- | --- |
+| `/start` | Launch the bot. Supports deep-link payloads — `?start=inline_setup` jumps straight to "add bank"; `?start=add_bank` / `?start=top` / `?start=help` route analogously. |
+| `/best <category>` | Instant "best card for X" answer (routes through the same path as inline mode). Without an argument it opens the full ranking. |
+| `/quickadd Tinkoff: АЗС 5%, Рестораны 3%` | Create or replace a saved bank in one message. Separators: `,`, `;`, `\n` between items; `:` / `—` / `-` between bank name and items. |
+| `/banks` | Open the saved-banks list. |
+| `/top` | Open the ranking. Empty-state shows an "Add first bank" onboarding CTA. |
+| `/settings` | Language, notifications. |
+| `/help` | List commands and common text intents. |
+| `/home` | Return to the main menu. |
+| `/cancel` | Discard any in-progress draft and return home. |
+
+Error messages always carry an inline keyboard (Home + context-aware Retry) so
+the user is never stranded on a text-only screen.
+
+**Rate limits:** photo uploads are throttled per-user (burst of 5, refill 1
+every 10 s) to protect the OCR path from accidental spam and abuse. Manual
+text input and slash commands are unthrottled.
 
 ## Current Baseline Vs Product Vision
 
@@ -75,8 +103,39 @@ The project follows a hexagonal/core-first split:
 
 - `app/domain`: pure domain models, enums, errors, normalization, parsing helpers, ranking rules.
 - `app/application`: workflow contracts, use cases, ports, application facade.
-- `app/adapters`: PostgreSQL, OCR, Telegram, web, scheduler, system clock.
+- `app/adapters`: PostgreSQL, OCR (Tesseract + OpenAI-compatible vision), Telegram, web, scheduler, system clock.
 - `app/bootstrap`: configuration, dependency wiring, startup checks, migrations, runtime.
+
+### Screenshot Recognition
+
+Bank-app screenshots are notoriously hard for classic OCR — compressed text,
+colored badges, mixed Russian/English labels. The `OCR_PROVIDER` setting picks
+the engine used to turn an uploaded image into `Category: N%` lines for the
+parser:
+
+- `auto` (default, **local-first**) — when `OPENAI_API_KEY` is set, uses a
+  composite adapter: **Tesseract runs first** (free, local), **OpenAI vision
+  is only called if Tesseract returned empty/timeout** for that specific
+  screenshot. If the API key is absent, auto is plain Tesseract. This keeps
+  the AI bill small while still giving the user a second chance on the hard
+  screenshots Tesseract mangles.
+- `tesseract` — `app/adapters/ocr_tesseract` only. Useful for fully offline
+  deployments or when an AI budget is a hard constraint.
+- `openai` — `app/adapters/ocr_openai_vision` only (no Tesseract fallback).
+  The adapter works against any OpenAI-compatible gateway: the real OpenAI,
+  Russian proxies (ProxyAPI, VSEgpt, …), self-hosted Ollama / LM Studio,
+  Together or Groq. Only `OPENAI_BASE_URL`, `OPENAI_MODEL`, and the API key
+  change.
+
+**Escalation rules for `auto`:** `errors.ocr_empty` and `errors.ocr_timeout`
+trigger the AI fallback; `errors.broken_image` / `errors.file_too_large` do
+not (both engines would fail equally, no point paying for the round-trip).
+
+The adapter is defensive by design: markdown-fenced replies, model
+pre-commentary, out-of-range percentages, duplicate categories, rate-limit
+errors, timeouts, auth failures, malformed JSON, and missing `content_type`
+headers are all mapped to the existing `errors.*` translation keys so the UX
+stays the same regardless of which engine answered.
 
 The business entrypoint is transport-agnostic:
 
@@ -93,6 +152,7 @@ Detailed architectural behavior is described in [docs/ARCHITECTURE.md](C:\Users\
 ```text
 app/
   adapters/
+    ocr_openai_vision/
     ocr_tesseract/
     postgres/
     scheduler/
@@ -148,6 +208,10 @@ Core variables are documented in [.env.example](C:\Users\Kuznetz\Desktop\proga\c
 - `LANG_DEFAULT`
 - `OCR_TIMEOUT`
 - `MAX_FILE_SIZE`
+- `OCR_PROVIDER` — `auto` (default), `openai`, or `tesseract`
+- `OPENAI_API_KEY` — required for `openai` or `auto` with LLM vision
+- `OPENAI_BASE_URL` — override for OpenAI-compatible endpoints (ProxyAPI, VSEgpt, Ollama, LM Studio, Together, Groq). Leave empty for the real OpenAI.
+- `OPENAI_MODEL` — defaults to `gpt-4o`
 - `APP_ENABLE_TELEGRAM`
 - `APP_ENABLE_WEB`
 - `WEB_BASE_URL`

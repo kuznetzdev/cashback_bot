@@ -45,3 +45,23 @@ def test_renderer_does_not_duplicate_text_for_same_title_and_body_key() -> None:
     screen = Screen(id="home", title_key="screens.home", body_key="screens.home")
     text = renderer._render_screen_text(screen, "en")
     assert text.count("Cashback Analyzer") == 1
+
+
+def test_renderer_builds_keyboard_for_notify_error_when_actions_given() -> None:
+    renderer = _build_renderer()
+    home = Action(command="open_home", label_key="buttons.home")
+    retry = Action(command="open_add_bank", label_key="buttons.try_again")
+
+    keyboard = renderer._build_actions_keyboard([retry, home], "en")
+
+    assert keyboard is not None
+    assert len(keyboard.inline_keyboard) == 2
+    assert keyboard.inline_keyboard[0][0].text == "Try again"
+    assert keyboard.inline_keyboard[0][0].callback_data == "nav:add_bank"
+    assert keyboard.inline_keyboard[1][0].text == "Home"
+    assert keyboard.inline_keyboard[1][0].callback_data == "nav:home"
+
+
+def test_renderer_returns_none_keyboard_for_empty_actions() -> None:
+    renderer = _build_renderer()
+    assert renderer._build_actions_keyboard([], "en") is None

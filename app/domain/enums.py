@@ -12,3 +12,9 @@ class SourceType(str, Enum):
     OCR = "ocr"
     MANUAL = "manual"
     TEMPLATE = "template"
+
+
+class OCRProvider(str, Enum):
+    AUTO = "auto"
+    OPENAI = "openai"
+    TESSERACT = "tesseract"

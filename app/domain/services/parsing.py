@@ -10,10 +10,15 @@ from app.domain.services.categories import CategoryService
 
 
 class ParserService:
+    # Accept percent up to 3 digits so a legitimate 100% marketing promo
+    # ("100% Cashback on first purchase") parses. The post-match guard in
+    # ``_parse_line`` still caps out-of-range values (>100 or <=0).
     LINE_PATTERNS = [
-        re.compile(r"^(?P<category>.+?)\s*[-:]\s*(?P<percent>\d{1,2}(?:[.,]\d{1,2})?)\s*%?$", re.IGNORECASE),
-        re.compile(r"^(?P<category>.+?)\s+(?P<percent>\d{1,2}(?:[.,]\d{1,2})?)\s*%?$", re.IGNORECASE),
-        re.compile(r"^(?P<percent>\d{1,2}(?:[.,]\d{1,2})?)\s*%?\s*(?:for|on)\s+(?P<category>.+?)$", re.IGNORECASE),
+        re.compile(r"^(?P<category>.+?)\s*[-:]\s*(?P<percent>\d{1,3}(?:[.,]\d{1,2})?)\s*%?$", re.IGNORECASE),
+        # "N% Category" — the layout every Russian bank app uses on its cashback page.
+        re.compile(r"^[+\-]?(?P<percent>\d{1,3}(?:[.,]\d{1,2})?)\s*%\s+(?P<category>.+?)$", re.IGNORECASE),
+        re.compile(r"^(?P<category>.+?)\s+(?P<percent>\d{1,3}(?:[.,]\d{1,2})?)\s*%?$", re.IGNORECASE),
+        re.compile(r"^(?P<percent>\d{1,3}(?:[.,]\d{1,2})?)\s*%?\s*(?:for|on)\s+(?P<category>.+?)$", re.IGNORECASE),
     ]
     DELETE_BANK = re.compile(r"^(?:удали|удалить|delete)\s+(?:банк|bank)\s+(.+)$", re.IGNORECASE)
     DELETE_CATEGORY = re.compile(r"^(?:удали|удалить|delete)\s+(?:категорию|категория|category)\s+(.+)$", re.IGNORECASE)
@@ -68,6 +73,14 @@ class ParserService:
             except InvalidOperation:
                 return None
             if not category or percent <= 0 or percent > 100:
+                return None
+            # Reject OCR artifacts: a "category" of length 1, or one that's
+            # entirely digits / punctuation (e.g. "%", "5", ":", "- -") —
+            # these slip through the permissive .+? capture when Tesseract
+            # mangles a screenshot into "5% 3% 7%" runs.
+            if len(category) < 2:
+                return None
+            if not any(ch.isalpha() for ch in category):
                 return None
             return category, percent.quantize(Decimal("0.01"))
         return None

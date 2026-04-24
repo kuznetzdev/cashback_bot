@@ -5,7 +5,11 @@ from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+import logging
+
 from app.adapters.auth_local import Argon2PasswordHasher
+from app.adapters.ocr_composite import CompositeOCRAdapter
+from app.adapters.ocr_openai_vision import OpenAIVisionOCRAdapter
 from app.adapters.ocr_tesseract import TesseractOCRAdapter
 from app.adapters.postgres.session import create_session_factory
 from app.adapters.postgres.uow import SqlAlchemyUnitOfWork, build_uow_factory
@@ -21,12 +25,16 @@ from app.application.auth.use_cases import (
     UnlinkExternalIdentityUseCase,
 )
 from app.application.contracts.ports import ReminderSenderPort
+from app.application.use_cases.best_card_for_category import BestCardForCategoryUseCase
+from app.application.use_cases.find_user_by_identity import FindUserByExternalIdentityUseCase
 from app.application.use_cases.handle_command import HandleCommandUseCase
 from app.application.use_cases.get_bank_details import GetBankDetailsUseCase
 from app.application.use_cases.get_history import GetHistoryUseCase
 from app.application.use_cases.get_user_banks import GetUserBanksUseCase
 from app.application.use_cases.log_event import LogEventUseCase
 from app.application.use_cases.process_uploaded_image import ProcessUploadedImageUseCase
+from app.application.use_cases.quick_add_bank import QuickAddBankUseCase
+from app.application.use_cases.ranking_snapshot import RankingSnapshotUseCase
 from app.application.use_cases.send_monthly_reminders import SendMonthlyRemindersUseCase
 from app.application.use_cases.save_bank_draft import SaveBankDraftUseCase
 from app.application.use_cases.sync_user import SyncTelegramUserUseCase
@@ -36,10 +44,16 @@ from app.application.use_cases.delete_category import DeleteCategoryUseCase
 from app.application.use_cases.get_ranking import GetRankingUseCase
 from app.application.use_cases.parse_manual_cashback import ParseManualCashbackUseCase
 from app.application.use_cases.toggle_notifications import ToggleNotificationsUseCase
+from openai import APIError
+
+from app.application.contracts.ports import OCRPort
 from app.bootstrap.config import Settings
+from app.domain.enums import OCRProvider
 from app.domain.services.categories import CategoryService
 from app.domain.services.parsing import ParserService
 from app.domain.services.ranking import RankingService
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -51,8 +65,88 @@ class CoreContainer:
     categories: CategoryService
     parser: ParserService
     ranking: RankingService
-    ocr: TesseractOCRAdapter
+    ocr: OCRPort
     clock: SystemClock
+
+
+def _build_tesseract(settings: Settings) -> TesseractOCRAdapter:
+    return TesseractOCRAdapter(
+        tesseract_path=settings.tesseract_path,
+        timeout=settings.ocr_timeout,
+        max_file_size=settings.max_file_size,
+        temp_dir=settings.temp_dir,
+    )
+
+
+def _build_openai_vision(settings: Settings) -> OpenAIVisionOCRAdapter:
+    return OpenAIVisionOCRAdapter(
+        api_key=settings.openai_api_key,
+        model=settings.openai_model,
+        base_url=settings.openai_base_url or None,
+        timeout=settings.openai_vision_timeout,
+        max_file_size=settings.max_file_size,
+        max_tokens=settings.openai_vision_max_tokens,
+    )
+
+
+def _build_ocr_adapter(settings: Settings, *, parser: ParserService | None = None) -> OCRPort:
+    raw_provider = (settings.ocr_provider or "auto").strip().lower()
+    try:
+        provider = OCRProvider(raw_provider)
+    except ValueError as error:
+        valid = ", ".join(item.value for item in OCRProvider)
+        raise ValueError(f"Unknown OCR_PROVIDER={raw_provider!r}; expected one of: {valid}") from error
+
+    has_openai_key = bool(settings.openai_api_key.strip())
+
+    if provider is OCRProvider.TESSERACT:
+        logger.info("OCR provider: tesseract (explicit, no AI fallback)")
+        return _build_tesseract(settings)
+
+    if provider is OCRProvider.OPENAI:
+        if not has_openai_key:
+            raise ValueError("OCR_PROVIDER=openai requires OPENAI_API_KEY to be set.")
+        logger.info(
+            "OCR provider: openai-vision (explicit, model=%s, base_url=%s)",
+            settings.openai_model,
+            settings.openai_base_url or "default",
+        )
+        return _build_openai_vision(settings)
+
+    # OCRProvider.AUTO — local-first, AI only when it genuinely helps.
+    # Tesseract handles 95% of bank screenshots for free. OpenAI vision is
+    # billed per call; we only want to pay for it when the free path gave up.
+    tesseract = _build_tesseract(settings)
+    if not has_openai_key:
+        logger.info("OCR provider: tesseract (auto, no OPENAI_API_KEY — local-only)")
+        return tesseract
+
+    try:
+        vision = _build_openai_vision(settings)
+    except (ImportError, APIError, ValueError) as error:  # pragma: no cover - defensive
+        logger.warning("OpenAI vision unavailable, running tesseract-only: %s", error)
+        return tesseract
+
+    content_validator: Callable[[str], bool] | None = None
+    if parser is not None:
+        # Tesseract can return text that looks plausible but contains zero
+        # parseable cashback lines (compressed screenshots, stylised fonts).
+        # In that case the composite adapter should still try the vision
+        # fallback rather than leave the user with an errors.ocr_empty.
+        def _has_parseable_offers(text: str) -> bool:
+            try:
+                return bool(parser.parse_ocr_text(text))
+            except Exception:  # pragma: no cover - defensive
+                return False
+
+        content_validator = _has_parseable_offers
+
+    logger.info(
+        "OCR provider: composite (auto: tesseract → openai-vision on failure, model=%s, base_url=%s)",
+        settings.openai_model,
+        settings.openai_base_url or "default",
+    )
+    return CompositeOCRAdapter(primary=tesseract, fallback=vision, content_validator=content_validator)
 
 
 def build_core_container(settings: Settings) -> CoreContainer:
@@ -67,12 +161,7 @@ def build_core_container(settings: Settings) -> CoreContainer:
     categories = CategoryService()
     parser = ParserService(categories)
     ranking = RankingService(categories)
-    ocr = TesseractOCRAdapter(
-        tesseract_path=settings.tesseract_path,
-        timeout=settings.ocr_timeout,
-        max_file_size=settings.max_file_size,
-        temp_dir=settings.temp_dir,
-    )
+    ocr = _build_ocr_adapter(settings, parser=parser)
     clock = SystemClock(settings.app_timezone)
     return CoreContainer(
         settings=settings,
@@ -109,6 +198,10 @@ def build_application_facade(core: CoreContainer, reminder_sender: ReminderSende
     change_language = ChangeLanguageUseCase(core.uow_factory)
     toggle_notifications = ToggleNotificationsUseCase(core.uow_factory)
     log_event = LogEventUseCase(core.uow_factory)
+    find_user_by_identity = FindUserByExternalIdentityUseCase(core.uow_factory)
+    best_card_for_category = BestCardForCategoryUseCase(core.uow_factory, core.ranking, core.categories)
+    quick_add_bank = QuickAddBankUseCase(core.parser, save_bank_draft)
+    ranking_snapshot = RankingSnapshotUseCase(core.uow_factory, core.ranking, core.categories)
     handle_command = HandleCommandUseCase(
         uow_factory=core.uow_factory,
         parser=core.parser,
@@ -146,4 +239,9 @@ def build_application_facade(core: CoreContainer, reminder_sender: ReminderSende
         handle_command,
         reminders,
         log_event,
+        find_user_by_identity,
+        best_card_for_category,
+        quick_add_bank,
+        get_ranking,
+        ranking_snapshot,
     )

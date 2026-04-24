@@ -1,7 +1,7 @@
 {
   "screens": {
     "home": "Cashback Analyzer\nChoose an action.",
-    "help": "Help\nSend a screenshot or text lines like \"Fuel 5%\". You can also ask: \"best cashback for restaurants\" or \"delete bank T-Bank\".",
+    "help": "Help\n\nQuick:\n• /best <category> — best card for a category\n• /quickadd <bank>: <category> <%>, … — add a bank in one line\n• /top — category ranking\n• /banks — my banks\n• /settings — language & notifications\n• /home — main menu, /cancel — cancel the current flow\n\nFree text:\n• \"where is better for restaurants\" — best card answer\n• \"delete bank T-Bank\", \"delete category fuel\"\n• \"Fuel 5%\" — add a line during manual input\n\nFrom any Telegram chat type @cashback_analyzer_bot <category> — instant recommendation.",
     "choose_bank": "Choose Bank\nSelect a bank from the list or provide your own.",
     "enter_bank_name": "Bank Name\nEnter your bank/card label.",
     "input_method": "Input Method\nBank: {bank_name}\nChoose how to add cashback categories.",
@@ -34,7 +34,8 @@
     "upload_hint": "Upload a screenshot from your banking app. Crop extra regions for better OCR.",
     "ocr_hint": "Hint: crop the screenshot, increase contrast, and try again.",
     "confirm_discard_draft": "You have unsaved changes.\nChoose what to do before going to {target}.",
-    "draft_discarded": "Draft was discarded."
+    "draft_discarded": "Draft was discarded.",
+    "no_ranking_data_onboarding": "No ranking data yet. Add your first bank and its cashback offers to get recommendations on where to pay."
   },
   "buttons": {
     "add_bank": "Add Bank",
@@ -69,7 +70,8 @@
     "save_and_continue": "Save and continue",
     "discard_and_continue": "Discard and continue",
     "link_telegram": "Link Telegram",
-    "unlink_telegram": "Unlink Telegram"
+    "unlink_telegram": "Unlink Telegram",
+    "try_again": "Try again"
   },
   "labels": {
     "notifications_on": "enabled",
@@ -124,6 +126,35 @@
     "identity_not_linked": "Telegram account is not linked. Sign in locally first.",
     "identity_already_linked": "This Telegram account is already linked to another user.",
     "identity_not_found": "Linked identity was not found.",
-    "last_identity_unlink_forbidden": "Add local credentials before unlinking the last external identity."
+    "last_identity_unlink_forbidden": "Add local credentials before unlinking the last external identity.",
+    "quickadd_usage": "Usage: /quickadd <bank>: <category> <percent>%, ...\nExample: /quickadd Tinkoff: Fuel 5%, Restaurants 3%",
+    "photo_rate_limited": "Too many photos too quickly. Please wait a moment and try again."
+  },
+  "commands": {
+    "start": "Start the bot",
+    "best": "Best card for a category",
+    "quickadd": "Quickly add a bank",
+    "banks": "My banks",
+    "top": "Top category ranking",
+    "settings": "Settings",
+    "help": "Help",
+    "home": "Main menu",
+    "cancel": "Cancel the current flow"
+  },
+  "inline": {
+    "open_bot": "Open the bot to configure your banks",
+    "result_title": "{category} — {percent}%",
+    "result_description": "Best cards: {banks}",
+    "share_message": "💳 Best cashback for \"{category}\": {percent}% at {banks}.",
+    "no_match_title": "No match for \"{query}\"",
+    "no_match_description": "Try another category name or add more banks.",
+    "no_match_body": "None of your banks cover \"{query}\" right now.",
+    "onboarding_title": "Open the bot to add your cards",
+    "onboarding_description": "Cashback Analyzer helps you pick the best card for a purchase.",
+    "onboarding_body": "Open a chat with the bot to add your cards and get recommendations.",
+    "empty_banks_title": "You haven't added any banks yet",
+    "empty_banks_description": "Add banks in the bot to get recommendations.",
+    "empty_banks_body": "Add your first bank in the bot to get recommendations.",
+    "no_banks_placeholder": "—"
   }
 }

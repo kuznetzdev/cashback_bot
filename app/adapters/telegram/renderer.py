@@ -13,7 +13,7 @@ from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt,
 
 from app.adapters.telegram.callbacks import encode_action
 from app.adapters.telegram.state import load_last_screen_message_id, save_last_screen_message_id
-from app.application.models import Screen
+from app.application.models import Action, Screen
 from app.i18n.localizer import Localizer
 
 logger = logging.getLogger(__name__)
@@ -52,9 +52,31 @@ class TelegramScreenRenderer:
             asyncio.create_task(self._delete_with_delay(bot, chat_id, status.message_id))
         return status
 
-    async def notify_error(self, event: Message | CallbackQuery, text: str) -> None:
+    async def notify_error(
+        self,
+        event: Message | CallbackQuery,
+        text: str,
+        *,
+        actions: list[Action] | None = None,
+        language: str | None = None,
+    ) -> None:
+        """Send an error message. When ``actions`` is supplied (even with a
+        single Home button), Telegram will render the inline keyboard so the
+        user is never stranded on a text-only screen without a way back."""
         bot, chat_id = self._extract_destination(event)
-        await self._send_message(bot=bot, chat_id=chat_id, text=text)
+        markup = self._build_actions_keyboard(actions, language or "ru") if actions else None
+        await self._send_message(bot=bot, chat_id=chat_id, text=text, markup=markup)
+
+    def _build_actions_keyboard(
+        self, actions: list[Action], language: str
+    ) -> InlineKeyboardMarkup | None:
+        if not actions:
+            return None
+        rows = [
+            [InlineKeyboardButton(text=self.localizer.t(action.label_key, language), callback_data=encode_action(action))]
+            for action in actions
+        ]
+        return InlineKeyboardMarkup(inline_keyboard=rows)
 
     def _render_screen_text(self, screen: Screen, language: str) -> str:
         title = self.localizer.t(screen.title_key, language)
@@ -64,14 +86,7 @@ class TelegramScreenRenderer:
         return f"{title}\n\n{body}"
 
     def _build_keyboard(self, screen: Screen, language: str) -> InlineKeyboardMarkup | None:
-        if not screen.actions:
-            return None
-        rows: list[list[InlineKeyboardButton]] = []
-        for action in screen.actions:
-            label = self.localizer.t(action.label_key, language)
-            callback_data = encode_action(action)
-            rows.append([InlineKeyboardButton(text=label, callback_data=callback_data)])
-        return InlineKeyboardMarkup(inline_keyboard=rows)
+        return self._build_actions_keyboard(screen.actions, language)
 
     async def _upsert_screen_message(
         self,

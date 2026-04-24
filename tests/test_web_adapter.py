@@ -23,8 +23,14 @@ from app.application.auth.use_cases import (
     RegisterLocalUserUseCase,
     UnlinkExternalIdentityUseCase,
 )
+from app.application.use_cases.best_card_for_category import BestCardForCategoryUseCase
+from app.application.use_cases.find_user_by_identity import FindUserByExternalIdentityUseCase
+from app.application.use_cases.get_ranking import GetRankingUseCase
 from app.application.use_cases.handle_command import HandleCommandUseCase
+from app.application.use_cases.ranking_snapshot import RankingSnapshotUseCase
 from app.application.use_cases.log_event import LogEventUseCase
+from app.application.use_cases.quick_add_bank import QuickAddBankUseCase
+from app.application.use_cases.save_bank_draft import SaveBankDraftUseCase
 from app.application.use_cases.send_monthly_reminders import SendMonthlyRemindersUseCase
 from app.application.use_cases.sync_user import SyncTelegramUserUseCase
 from app.domain.services.categories import CategoryService
@@ -61,6 +67,11 @@ def _build_facade(uow_factory, dummy_ocr) -> ApplicationFacade:
             reminder_hour=10,
         ),
         LogEventUseCase(uow_factory),
+        FindUserByExternalIdentityUseCase(uow_factory),
+        BestCardForCategoryUseCase(uow_factory, ranking, categories),
+        QuickAddBankUseCase(parser, SaveBankDraftUseCase(uow_factory)),
+        GetRankingUseCase(uow_factory, ranking),
+        RankingSnapshotUseCase(uow_factory, ranking, categories),
     )
 
 
@@ -231,3 +242,61 @@ def test_authenticated_user_can_link_and_unlink_telegram(uow_factory, dummy_ocr,
     unlink = client.post("/auth/telegram/unlink", follow_redirects=False)
     assert unlink.status_code == 303
     assert all(identity.provider_user_id != "999" for identity in store.identities.values())
+
+
+def test_api_best_returns_401_for_anonymous(uow_factory, dummy_ocr, tmp_path: Path) -> None:
+    client = _build_client(uow_factory, dummy_ocr, tmp_path)
+    response = client.get("/api/best", params={"q": "азс"})
+    assert response.status_code == 401
+    assert response.json() == {"error": "unauthenticated"}
+
+
+def test_api_best_returns_snapshot_for_authenticated_user(
+    uow_factory, dummy_ocr, tmp_path: Path
+) -> None:
+    client = _build_client(uow_factory, dummy_ocr, tmp_path)
+    _register(client, username="api_user")
+
+    # Add a bank with one category so the snapshot has data to return.
+    client.post("/app/action", data={"command": "open_add_bank", "payload_json": "{}"})
+    client.post("/app/action", data={"command": "select_bank_preset", "payload_json": "{\"index\": 0}"})
+    client.post(
+        "/app/action",
+        data={"command": "choose_input_method", "payload_json": "{\"method\": \"manual\"}"},
+    )
+    client.post("/app/input", data={"text": "АЗС 5%"})
+    client.post("/app/action", data={"command": "save_bank", "payload_json": "{}"})
+
+    response = client.get("/api/best", params={"q": "азс"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["normalized_slug"] == "fuel"
+    assert body["best_match"] is not None
+    assert body["best_match"]["category_slug"] == "fuel"
+    assert body["best_match"]["best_percent"] == "5.00"
+    assert isinstance(body["leaders"], list)
+    assert len(body["leaders"]) >= 1
+
+
+def test_api_best_empty_query_returns_leaders_without_match(
+    uow_factory, dummy_ocr, tmp_path: Path
+) -> None:
+    client = _build_client(uow_factory, dummy_ocr, tmp_path)
+    _register(client, username="api_user2")
+
+    client.post("/app/action", data={"command": "open_add_bank", "payload_json": "{}"})
+    client.post("/app/action", data={"command": "select_bank_preset", "payload_json": "{\"index\": 0}"})
+    client.post(
+        "/app/action",
+        data={"command": "choose_input_method", "payload_json": "{\"method\": \"manual\"}"},
+    )
+    client.post("/app/input", data={"text": "Рестораны 7%"})
+    client.post("/app/action", data={"command": "save_bank", "payload_json": "{}"})
+
+    response = client.get("/api/best")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["query"] == ""
+    # No query → best_match intentionally null; leaders still populated.
+    assert body["best_match"] is None
+    assert any(leader["category_slug"] == "restaurants" for leader in body["leaders"])

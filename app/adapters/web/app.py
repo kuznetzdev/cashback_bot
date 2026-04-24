@@ -7,7 +7,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from fastapi import FastAPI, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -271,7 +271,40 @@ def create_web_app(deps: WebDependencies) -> FastAPI:
             ),
         )
 
+    @app.get("/api/best")
+    async def api_best(request: Request, q: str = "") -> Response:
+        """Feature-parity with Telegram inline mode: ``GET /api/best?q=азс``
+        returns the signed-in user's best-matching card plus fallback top
+        categories. No FSM, no HTML — usable from a future mobile app, a
+        browser extension, or a scripted shell pipeline."""
+        user = await _get_current_user(request, deps)
+        if user is None:
+            return JSONResponse(status_code=401, content={"error": "unauthenticated"})
+        snapshot = await deps.facade.ranking_snapshot(
+            user_id=user.id, query=q, language=user.language
+        )
+        return JSONResponse(
+            content={
+                "query": snapshot.query,
+                "normalized_slug": snapshot.normalized_slug,
+                "display_name": snapshot.display_name,
+                "best_match": _leader_to_dict(snapshot.best_match),
+                "leaders": [_leader_to_dict(leader) for leader in snapshot.leaders],
+            }
+        )
+
     return app
+
+
+def _leader_to_dict(leader) -> dict[str, object] | None:
+    if leader is None:
+        return None
+    return {
+        "category_slug": leader.category_slug,
+        "category_name": leader.category_name,
+        "best_percent": str(leader.best_percent),
+        "bank_names": leader.bank_names,
+    }
 
 
 async def _execute_and_render(
