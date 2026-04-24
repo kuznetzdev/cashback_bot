@@ -1,7 +1,7 @@
 {
   "screens": {
     "home": "Cashback Analyzer\nChoose an action.",
-    "help": "Help\nSend a screenshot or text lines like \"Fuel 5%\". You can also ask: \"best cashback for restaurants\" or \"delete bank T-Bank\".",
+    "help": "Help\n\nQuick:\n• /best <category> — best card for a category\n• /quickadd <bank>: <category> <%>, … — add a bank in one line\n• /top — category ranking\n• /banks — my banks\n• /settings — language & notifications\n• /home — main menu, /cancel — cancel the current flow\n\nFree text:\n• \"where is better for restaurants\" — best card answer\n• \"delete bank T-Bank\", \"delete category fuel\"\n• \"Fuel 5%\" — add a line during manual input\n\nFrom any Telegram chat type @cashback_analyzer_bot <category> — instant recommendation.",
     "choose_bank": "Choose Bank\nSelect a bank from the list or provide your own.",
     "enter_bank_name": "Bank Name\nEnter your bank/card label.",
     "input_method": "Input Method\nBank: {bank_name}\nChoose how to add cashback categories.",
@@ -151,10 +151,10 @@
     "no_match_body": "None of your banks cover \"{query}\" right now.",
     "onboarding_title": "Open the bot to add your cards",
     "onboarding_description": "Cashback Analyzer helps you pick the best card for a purchase.",
-    "onboarding_body": "Open a chat with the bot: {link}",
+    "onboarding_body": "Open a chat with the bot to add your cards and get recommendations.",
     "empty_banks_title": "You haven't added any banks yet",
     "empty_banks_description": "Add banks in the bot to get recommendations.",
-    "empty_banks_body": "Add banks in the bot: {link}",
+    "empty_banks_body": "Add your first bank in the bot to get recommendations.",
     "no_banks_placeholder": "—"
   }
 }

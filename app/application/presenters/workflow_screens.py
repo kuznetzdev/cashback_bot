@@ -270,11 +270,18 @@ def top_screen(leaders: list[CategoryLeader], global_rating: list[BankScore]) ->
 
 def top_category_screen(leader: CategoryLeader | None) -> Screen:
     if leader is None:
+        # Offer an Add-bank CTA so a user who asked "best card for X" but has
+        # nothing configured can act on the answer immediately, instead of
+        # having to find the add-bank entry point themselves.
         return Screen(
             id="top_category",
             title_key="screens.top_category",
             body_key="messages.no_ranking_data",
-            actions=[Action(command="open_top", label_key="buttons.back"), Action(command="open_home", label_key="buttons.home")],
+            actions=[
+                Action(command="open_add_bank", label_key="buttons.add_bank"),
+                Action(command="open_top", label_key="buttons.back"),
+                Action(command="open_home", label_key="buttons.home"),
+            ],
         )
     return Screen(
         id="top_category",

@@ -18,10 +18,13 @@ class QuickAddResult:
     items: list[CashbackDraftItem]
 
 
-# Split cashback lines on commas, newlines, or semicolons so users can type in
-# whatever shape they like: ``Tinkoff: АЗС 5%, Рестораны 3%`` or
-# ``Tinkoff: АЗС 5%; Рестораны 3%`` or even multi-line.
-_ITEM_SEPARATOR = re.compile(r"[,\n;]+")
+# Split cashback lines on newlines, semicolons, or commas — BUT only commas
+# that are NOT part of a decimal number. Russian locale uses both:
+#   "АЗС 2,5%" — comma is a decimal separator, must be preserved;
+#   "АЗС 5%, Рестораны 3%" — comma is an item separator, must split.
+# The lookbehind/lookahead pair ensures a comma between two digits is left
+# alone so the downstream percent parser sees "2,5" as the decimal it is.
+_ITEM_SEPARATOR = re.compile(r"[\n;]+|(?<!\d),(?!\d)")
 
 
 class QuickAddBankUseCase:

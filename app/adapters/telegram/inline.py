@@ -168,29 +168,27 @@ def _no_match_result(
 def _onboarding_result(deps: InlineDependencies) -> InlineQueryResultArticle:
     language = deps.default_language
     link = _deep_link(deps.bot_username, payload=PAYLOAD_INLINE)
+    body = deps.localizer.t("inline.onboarding_body", language)
+    if link:
+        body = f"{body}\n{link}"
     return _build_article(
         result_id=_RESULT_ID_ONBOARDING,
         title=deps.localizer.t("inline.onboarding_title", language),
         description=deps.localizer.t("inline.onboarding_description", language),
-        message_text=deps.localizer.t(
-            "inline.onboarding_body",
-            language,
-            {"link": link} if link else None,
-        ),
+        message_text=body,
     )
 
 
 def _empty_banks_result(user: UserAccount, deps: InlineDependencies) -> InlineQueryResultArticle:
     link = _deep_link(deps.bot_username, payload=PAYLOAD_INLINE_SETUP)
+    body = deps.localizer.t("inline.empty_banks_body", user.language)
+    if link:
+        body = f"{body}\n{link}"
     return _build_article(
         result_id=_RESULT_ID_EMPTY_BANKS,
         title=deps.localizer.t("inline.empty_banks_title", user.language),
         description=deps.localizer.t("inline.empty_banks_description", user.language),
-        message_text=deps.localizer.t(
-            "inline.empty_banks_body",
-            user.language,
-            {"link": link} if link else None,
-        ),
+        message_text=body,
     )
 
 
