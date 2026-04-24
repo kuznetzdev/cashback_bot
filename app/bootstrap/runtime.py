@@ -29,6 +29,7 @@ from app.bootstrap.config import Settings, get_settings
 from app.bootstrap.container import build_application_facade, build_core_container
 from app.bootstrap.db_startup import ensure_database_exists
 from app.bootstrap.logger import configure_logging
+from app.bootstrap.metrics import MetricsRegistry, build_metrics_registry
 from app.i18n.localizer import Localizer
 
 logger = logging.getLogger(__name__)
@@ -41,7 +42,11 @@ async def run_app() -> None:
 
     await ensure_database_exists(settings)
 
-    core = build_core_container(settings)
+    # One metrics registry for the whole process — wired into the OCR adapter
+    # (so `cashback_bot_ocr_calls_total` is actually populated) and handed to
+    # the web app / telegram router so their middleware hits the same counters.
+    metrics = build_metrics_registry()
+    core = build_core_container(settings, metrics=metrics)
     settings.temp_dir.mkdir(parents=True, exist_ok=True)
 
     locales_dir = Path(__file__).resolve().parents[1] / "locales"
@@ -76,6 +81,7 @@ async def run_app() -> None:
                 settings=settings,
                 facade=telegram_facade,
                 localizer=localizer,
+                metrics=metrics,
             )
             reminder_loop = ReminderLoop(telegram_facade.send_monthly_reminders)
             reminder_loop.start()
@@ -99,6 +105,7 @@ async def run_app() -> None:
                         bot=bot,
                         facade=telegram_facade,
                         localizer=localizer,
+                        metrics=metrics,
                     ),
                     name="telegram-adapter",
                 )
@@ -128,6 +135,7 @@ async def run_app() -> None:
             telegram_ping=_make_telegram_ping(bot) if bot is not None else None,
             ocr_provider_name=settings.ocr_provider,
             app_version=_resolve_app_version(),
+            metrics=metrics,
         )
         web_app = create_web_app(web_deps)
         tasks.append(
@@ -221,6 +229,7 @@ def _build_dispatcher(
     settings: Settings,
     facade: ApplicationFacade,
     localizer: Localizer,
+    metrics: MetricsRegistry | None = None,
 ) -> Dispatcher:
     """Factor out dispatcher/router construction so polling and webhook modes
     share the identical wiring. The only thing that changes between them is
@@ -236,6 +245,7 @@ def _build_dispatcher(
         # Burst 5 photos, refill 1 every 10s. Enough for normal use (swap cards,
         # reshoot a blurry photo) while capping abuse at ~6 photos/minute/user.
         photo_rate_limiter=TokenBucketRateLimiter(capacity=5, refill_per_second=0.1),
+        metrics=metrics,
     )
     dp.include_router(build_router(telegram_deps))
     return dp
@@ -247,8 +257,11 @@ async def _run_telegram_adapter(
     bot: Bot,
     facade: ApplicationFacade,
     localizer: Localizer,
+    metrics: MetricsRegistry | None = None,
 ) -> None:
-    dp = _build_dispatcher(settings=settings, facade=facade, localizer=localizer)
+    dp = _build_dispatcher(
+        settings=settings, facade=facade, localizer=localizer, metrics=metrics
+    )
     reminder_loop = ReminderLoop(facade.send_monthly_reminders)
     reminder_loop.start()
     try:

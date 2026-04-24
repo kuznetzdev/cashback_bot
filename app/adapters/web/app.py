@@ -62,14 +62,20 @@ class WebDependencies:
     telegram_ping: Any | None = None
     ocr_provider_name: str = "auto"
     app_version: str = "dev"
+    # Shared MetricsRegistry injected by the runtime. Optional for tests.
+    metrics: Any | None = None
 
 
 def create_web_app(deps: WebDependencies) -> FastAPI:
     app = FastAPI(title="Cashback Analyzer Web", docs_url=None, redoc_url=None)
     app.state.deps = deps
-    # Expose Prometheus counters on the app so the router-side LoggingMiddleware
-    # and OCR adapters can increment them without a module-level global.
-    app.state.metrics = _build_metrics_registry()
+    # Prefer a registry injected by the runtime (shared with OCR adapters and
+    # the telegram middleware) so counters are consistent across layers.
+    # Fall back to a local one when the web app is constructed standalone
+    # (tests, which don't wire the full runtime).
+    from app.bootstrap.metrics import build_metrics_registry
+
+    app.state.metrics = deps.metrics or build_metrics_registry()
     app.add_middleware(_SecurityHeadersMiddleware)
     app.add_middleware(_CorrelationIdMiddleware)
     app.add_middleware(_RateLimitMiddleware, deps=deps)
@@ -879,51 +885,6 @@ def _stable_ip_key(host: str) -> int:
 
     digest = hashlib.sha1(host.encode("utf-8"), usedforsecurity=False).digest()
     return int.from_bytes(digest[:8], "big") & ((1 << 62) - 1)
-
-
-class _MetricsRegistry:
-    """Thin wrapper around prometheus_client collectors used by LoggingMiddleware
-    and OCR adapters to update counters without importing prometheus_client
-    at every call site."""
-
-    def __init__(self) -> None:
-        from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram
-
-        self.registry = CollectorRegistry(auto_describe=True)
-        self.requests_total = Counter(
-            "cashback_bot_requests_total",
-            "Handler invocations by handler and status",
-            ["handler", "status"],
-            registry=self.registry,
-        )
-        self.request_duration = Histogram(
-            "cashback_bot_request_duration_seconds",
-            "Handler latency distribution",
-            ["handler"],
-            registry=self.registry,
-        )
-        self.ocr_calls_total = Counter(
-            "cashback_bot_ocr_calls_total",
-            "OCR calls by provider and result",
-            ["provider", "result"],
-            registry=self.registry,
-        )
-        self.active_users = Gauge(
-            "cashback_bot_active_users_total",
-            "Unique users seen in the current process window",
-            registry=self.registry,
-        )
-        self._seen_users: set[int] = set()
-
-    def observe_user(self, user_id: int) -> None:
-        if user_id in self._seen_users:
-            return
-        self._seen_users.add(user_id)
-        self.active_users.set(len(self._seen_users))
-
-
-def _build_metrics_registry() -> _MetricsRegistry:
-    return _MetricsRegistry()
 
 
 async def _check_db(deps: WebDependencies) -> str:

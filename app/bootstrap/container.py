@@ -9,6 +9,7 @@ import logging
 
 from app.adapters.auth_local import Argon2PasswordHasher
 from app.adapters.ocr_composite import CompositeOCRAdapter
+from app.adapters.ocr_metrics import MetricsOCRAdapter
 from app.adapters.ocr_openai_vision import OpenAIVisionOCRAdapter
 from app.adapters.ocr_tesseract import TesseractOCRAdapter
 from app.adapters.postgres.session import create_session_factory
@@ -67,6 +68,10 @@ class CoreContainer:
     ranking: RankingService
     ocr: OCRPort
     clock: SystemClock
+    # Shared Prometheus metrics registry — passed through to the web app and
+    # used to instrument OCR + middleware call counters. Optional so the
+    # container can be built without the prometheus_client dep in tests.
+    metrics: object | None = None
 
 
 def _build_tesseract(settings: Settings) -> TesseractOCRAdapter:
@@ -89,7 +94,12 @@ def _build_openai_vision(settings: Settings) -> OpenAIVisionOCRAdapter:
     )
 
 
-def _build_ocr_adapter(settings: Settings, *, parser: ParserService | None = None) -> OCRPort:
+def _build_ocr_adapter(
+    settings: Settings,
+    *,
+    parser: ParserService | None = None,
+    metrics: object | None = None,
+) -> OCRPort:
     raw_provider = (settings.ocr_provider or "auto").strip().lower()
     try:
         provider = OCRProvider(raw_provider)
@@ -98,12 +108,14 @@ def _build_ocr_adapter(settings: Settings, *, parser: ParserService | None = Non
         raise ValueError(f"Unknown OCR_PROVIDER={raw_provider!r}; expected one of: {valid}") from error
 
     has_openai_key = bool(settings.openai_api_key.strip())
+    adapter: OCRPort
+    provider_label: str
 
     if provider is OCRProvider.TESSERACT:
         logger.info("OCR provider: tesseract (explicit, no AI fallback)")
-        return _build_tesseract(settings)
-
-    if provider is OCRProvider.OPENAI:
+        adapter = _build_tesseract(settings)
+        provider_label = "tesseract"
+    elif provider is OCRProvider.OPENAI:
         if not has_openai_key:
             raise ValueError("OCR_PROVIDER=openai requires OPENAI_API_KEY to be set.")
         logger.info(
@@ -111,45 +123,62 @@ def _build_ocr_adapter(settings: Settings, *, parser: ParserService | None = Non
             settings.openai_model,
             settings.openai_base_url or "default",
         )
-        return _build_openai_vision(settings)
-
-    # OCRProvider.AUTO — local-first, AI only when it genuinely helps.
-    # Tesseract handles 95% of bank screenshots for free. OpenAI vision is
-    # billed per call; we only want to pay for it when the free path gave up.
-    tesseract = _build_tesseract(settings)
-    if not has_openai_key:
-        logger.info("OCR provider: tesseract (auto, no OPENAI_API_KEY — local-only)")
-        return tesseract
-
-    try:
-        vision = _build_openai_vision(settings)
-    except (ImportError, APIError, ValueError) as error:  # pragma: no cover - defensive
-        logger.warning("OpenAI vision unavailable, running tesseract-only: %s", error)
-        return tesseract
-
-    content_validator: Callable[[str], bool] | None = None
-    if parser is not None:
-        # Tesseract can return text that looks plausible but contains zero
-        # parseable cashback lines (compressed screenshots, stylised fonts).
-        # In that case the composite adapter should still try the vision
-        # fallback rather than leave the user with an errors.ocr_empty.
-        def _has_parseable_offers(text: str) -> bool:
+        adapter = _build_openai_vision(settings)
+        provider_label = "openai"
+    else:
+        # OCRProvider.AUTO — local-first, AI only when it genuinely helps.
+        # Tesseract handles 95% of bank screenshots for free. OpenAI vision is
+        # billed per call; we only want to pay for it when the free path gave up.
+        tesseract = _build_tesseract(settings)
+        if not has_openai_key:
+            logger.info("OCR provider: tesseract (auto, no OPENAI_API_KEY — local-only)")
+            adapter = tesseract
+            provider_label = "tesseract"
+        else:
             try:
-                return bool(parser.parse_ocr_text(text))
-            except Exception:  # pragma: no cover - defensive
-                return False
+                vision = _build_openai_vision(settings)
+            except (ImportError, APIError, ValueError) as error:  # pragma: no cover - defensive
+                logger.warning("OpenAI vision unavailable, running tesseract-only: %s", error)
+                adapter = tesseract
+                provider_label = "tesseract"
+            else:
+                content_validator: Callable[[str], bool] | None = None
+                if parser is not None:
+                    # Tesseract can return text that looks plausible but contains
+                    # zero parseable cashback lines (compressed screenshots,
+                    # stylised fonts). In that case the composite adapter should
+                    # still try the vision fallback rather than leave the user
+                    # with an errors.ocr_empty.
+                    def _has_parseable_offers(text: str) -> bool:
+                        try:
+                            return bool(parser.parse_ocr_text(text))
+                        except Exception:  # pragma: no cover - defensive
+                            return False
 
-        content_validator = _has_parseable_offers
+                    content_validator = _has_parseable_offers
 
-    logger.info(
-        "OCR provider: composite (auto: tesseract → openai-vision on failure, model=%s, base_url=%s)",
-        settings.openai_model,
-        settings.openai_base_url or "default",
-    )
-    return CompositeOCRAdapter(primary=tesseract, fallback=vision, content_validator=content_validator)
+                logger.info(
+                    "OCR provider: composite (auto: tesseract → openai-vision on failure, model=%s, base_url=%s)",
+                    settings.openai_model,
+                    settings.openai_base_url or "default",
+                )
+                adapter = CompositeOCRAdapter(
+                    primary=tesseract,
+                    fallback=vision,
+                    content_validator=content_validator,
+                )
+                provider_label = "composite"
+
+    if metrics is not None and getattr(metrics, "ocr_calls_total", None) is not None:
+        adapter = MetricsOCRAdapter(adapter, provider=provider_label, counter=metrics.ocr_calls_total)
+    return adapter
 
 
-def build_core_container(settings: Settings) -> CoreContainer:
+def build_core_container(
+    settings: Settings,
+    *,
+    metrics: object | None = None,
+) -> CoreContainer:
     engine, session_factory = create_session_factory(
         settings.sqlalchemy_database_uri,
         pool_size=settings.db_pool_size,
@@ -161,7 +190,7 @@ def build_core_container(settings: Settings) -> CoreContainer:
     categories = CategoryService()
     parser = ParserService(categories)
     ranking = RankingService(categories)
-    ocr = _build_ocr_adapter(settings, parser=parser)
+    ocr = _build_ocr_adapter(settings, parser=parser, metrics=metrics)
     clock = SystemClock(settings.app_timezone)
     return CoreContainer(
         settings=settings,
@@ -173,6 +202,7 @@ def build_core_container(settings: Settings) -> CoreContainer:
         ranking=ranking,
         ocr=ocr,
         clock=clock,
+        metrics=metrics,
     )
 
 
