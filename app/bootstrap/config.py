@@ -4,8 +4,11 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+_DEFAULT_SESSION_SECRET = "change-me-session-secret"  # noqa: S105 - sentinel, not a real secret
 
 
 class Settings(BaseSettings):
@@ -85,6 +88,21 @@ class Settings(BaseSettings):
                 return value
             return [item.strip() for item in stripped.split(",") if item.strip()]
         return value
+
+    @model_validator(mode="after")
+    def _reject_default_session_secret(self) -> "Settings":
+        # Fail-fast on unsafe production combos: if the web adapter is on
+        # the session secret MUST be something other than the shipped
+        # placeholder. We only enforce this when APP_ENABLE_WEB=true so
+        # CLI-only / bot-only deployments don't need to fabricate a value.
+        if self.app_enable_web:
+            if not self.web_session_secret or self.web_session_secret == _DEFAULT_SESSION_SECRET:
+                raise ValueError(
+                    "WEB_SESSION_SECRET must be changed from the default when "
+                    "APP_ENABLE_WEB=true. Generate a strong random value "
+                    "(e.g. `openssl rand -hex 32`)."
+                )
+        return self
 
     model_config = SettingsConfigDict(
         env_file=".env",

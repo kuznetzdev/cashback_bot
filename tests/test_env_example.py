@@ -46,6 +46,15 @@ REQUIRED_ENV_KEYS = {
     "WEB_MAX_UPLOAD_SIZE",
     "LOG_LEVEL",
     "TEMP_DIR",
+    # Added for production hardening (tasks 1, 2, 10).
+    "FSM_STORAGE",
+    "REDIS_URL",
+    "WEBHOOK_ENABLED",
+    "WEBHOOK_PATH",
+    "WEBHOOK_SECRET",
+    "CORS_ORIGINS",
+    "METRICS_TOKEN",
+    "API_RATE_LIMIT_PER_MINUTE",
 }
 
 
