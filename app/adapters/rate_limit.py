@@ -1,0 +1,94 @@
+"""Shared token-bucket rate limiter used by telegram (photo uploads) and
+the web adapter (public API).
+
+Kept deliberately simple: in-memory, single-process, no persistence. A user
+or IP that restarts the process gets a fresh allowance; that's acceptable for
+the abuse profile we're defending against (individual users hammering a single
+session).
+"""
+from __future__ import annotations
+
+import time
+from dataclasses import dataclass
+
+
+@dataclass(slots=True)
+class _Bucket:
+    tokens: float
+    last_refill_monotonic: float
+
+
+class TokenBucketRateLimiter:
+    """Classic token-bucket: a bucket refills at ``refill_per_second`` up to
+    ``capacity`` tokens. Each successful :meth:`allow` call costs one token.
+
+    Idle users are evicted: a bucket whose ``last_refill_monotonic`` is older
+    than ``idle_ttl_seconds`` is dropped the next time we touch the dictionary.
+    This prevents unbounded memory growth when new users join the bot without
+    ever triggering cleanup externally.
+
+    Thread-safety: not required — the Telegram dispatcher serialises updates
+    for a given user, and we never share a bucket across users.
+    """
+
+    def __init__(
+        self,
+        *,
+        capacity: int,
+        refill_per_second: float,
+        idle_ttl_seconds: float = 3600.0,
+        sweep_every: int = 512,
+    ) -> None:
+        if capacity <= 0:
+            raise ValueError("capacity must be positive")
+        if refill_per_second <= 0:
+            raise ValueError("refill_per_second must be positive")
+        if idle_ttl_seconds <= 0:
+            raise ValueError("idle_ttl_seconds must be positive")
+        self._capacity = float(capacity)
+        self._refill_per_second = float(refill_per_second)
+        self._idle_ttl = float(idle_ttl_seconds)
+        self._sweep_every = max(1, sweep_every)
+        self._buckets: dict[int, _Bucket] = {}
+        self._allow_calls_since_sweep = 0
+
+    def allow(self, user_id: int, *, now: float | None = None) -> bool:
+        current = now if now is not None else time.monotonic()
+        self._maybe_sweep(current)
+        bucket = self._buckets.get(user_id)
+        if bucket is None:
+            bucket = _Bucket(tokens=self._capacity, last_refill_monotonic=current)
+            self._buckets[user_id] = bucket
+        else:
+            elapsed = max(0.0, current - bucket.last_refill_monotonic)
+            bucket.tokens = min(self._capacity, bucket.tokens + elapsed * self._refill_per_second)
+            bucket.last_refill_monotonic = current
+        if bucket.tokens < 1.0:
+            return False
+        bucket.tokens -= 1.0
+        return True
+
+    def remaining(self, user_id: int, *, now: float | None = None) -> float:
+        """Exposed for diagnostics / tests."""
+        bucket = self._buckets.get(user_id)
+        if bucket is None:
+            return self._capacity
+        current = now if now is not None else time.monotonic()
+        elapsed = max(0.0, current - bucket.last_refill_monotonic)
+        return min(self._capacity, bucket.tokens + elapsed * self._refill_per_second)
+
+    def _maybe_sweep(self, current: float) -> None:
+        self._allow_calls_since_sweep += 1
+        if self._allow_calls_since_sweep < self._sweep_every:
+            return
+        self._allow_calls_since_sweep = 0
+        cutoff = current - self._idle_ttl
+        # Copy keys — we'll mutate the dict during iteration.
+        stale = [uid for uid, bucket in self._buckets.items() if bucket.last_refill_monotonic < cutoff]
+        for uid in stale:
+            del self._buckets[uid]
+
+    # Exposed for tests — lets assertions check the internal dict size
+    # without poking at private attributes.
+    def tracked_users(self) -> int:
+        return len(self._buckets)

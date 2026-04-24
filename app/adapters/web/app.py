@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.adapters.auth_telegram import verify_telegram_login
@@ -42,10 +44,43 @@ class WebDependencies:
     max_upload_size: int
     secure_cookies: bool
     session_secret: str
+    # Webhook integration (aiogram Dispatcher/Bot are injected from runtime).
+    webhook_path: str = "/bot/webhook"
+    webhook_secret: str = ""
+    # Any aiogram Bot; typed loosely so tests don't need the full Bot surface.
+    bot: Any | None = None
+    dispatcher: Any | None = None
+    # Security / observability — `*` allows any origin (dev default). Production
+    # callers should set an explicit list via CORS_ORIGINS.
+    cors_origins: list[str] = field(default_factory=lambda: ["*"])
+    metrics_token: str = ""
+    api_rate_limit_per_minute: int = 60
+    # Optional health-check helpers — the runtime wires ping callables so the
+    # web app can verify DB and Telegram reachability without holding
+    # references to the engine/bot objects itself.
+    db_ping: Any | None = None
+    telegram_ping: Any | None = None
+    ocr_provider_name: str = "auto"
+    app_version: str = "dev"
 
 
 def create_web_app(deps: WebDependencies) -> FastAPI:
     app = FastAPI(title="Cashback Analyzer Web", docs_url=None, redoc_url=None)
+    app.state.deps = deps
+    # Expose Prometheus counters on the app so the router-side LoggingMiddleware
+    # and OCR adapters can increment them without a module-level global.
+    app.state.metrics = _build_metrics_registry()
+    app.add_middleware(_SecurityHeadersMiddleware)
+    app.add_middleware(_RateLimitMiddleware, deps=deps)
+    from fastapi.middleware.cors import CORSMiddleware
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=deps.cors_origins or ["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     app.add_middleware(
         SessionMiddleware,
         secret_key=deps.session_secret,
@@ -270,6 +305,72 @@ def create_web_app(deps: WebDependencies) -> FastAPI:
                 },
             ),
         )
+
+    @app.get("/health")
+    async def health(request: Request) -> Response:
+        """Deep health probe — touches DB and optionally Telegram / OCR so
+        load balancers and orchestrators only route traffic to ready replicas.
+        Returns HTTP 503 when any dependency is unreachable; 200 otherwise."""
+        _ = request
+        db_status = await _check_db(deps)
+        telegram_status = await _check_telegram(deps)
+        ocr_status = deps.ocr_provider_name or "n/a"
+        degraded = db_status != "ok" or telegram_status == "error"
+        payload = {
+            "status": "ok" if not degraded else "degraded",
+            "db": db_status,
+            "telegram": telegram_status,
+            "ocr": {"primary": ocr_status, "status": "ok"},
+            "version": deps.app_version,
+        }
+        code = 200 if not degraded else 503
+        return JSONResponse(content=payload, status_code=code)
+
+    @app.get("/metrics")
+    async def metrics(request: Request) -> Response:
+        """Prometheus scrape endpoint. Protected by a bearer token when
+        ``METRICS_TOKEN`` is set — a missing/wrong token returns 401. An empty
+        token means the endpoint is exposed to anyone that can reach the web
+        listener (fine for local dev; don't do this in production)."""
+        if deps.metrics_token:
+            auth_header = request.headers.get("authorization", "")
+            expected = f"Bearer {deps.metrics_token}"
+            if auth_header != expected:
+                return Response(status_code=401, content="unauthorized")
+        from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+
+        data = generate_latest(app.state.metrics.registry)
+        return Response(content=data, media_type=CONTENT_TYPE_LATEST)
+
+    @app.post(deps.webhook_path)
+    async def telegram_webhook(request: Request) -> Response:
+        """Telegram webhook receiver.
+
+        Validates ``X-Telegram-Bot-Api-Secret-Token`` when ``WEBHOOK_SECRET`` is
+        set. The bot/dispatcher are optional so tests can assert the security
+        check without wiring a full aiogram stack.
+        """
+        if deps.webhook_secret:
+            token = request.headers.get("x-telegram-bot-api-secret-token", "")
+            if token != deps.webhook_secret:
+                return Response(status_code=403, content="forbidden")
+        if deps.bot is None or deps.dispatcher is None:
+            return Response(status_code=503, content="webhook not wired")
+        try:
+            payload = await request.json()
+        except Exception:
+            return Response(status_code=400, content="invalid json")
+        try:
+            # Lazy import so the web package stays importable without aiogram
+            # (tests that only hit /health or /metrics don't need it).
+            from aiogram.types import Update
+
+            update = Update.model_validate(payload, context={"bot": deps.bot})
+            await deps.dispatcher.feed_webhook_update(deps.bot, update)
+        except Exception as error:  # pragma: no cover - logged for ops
+            logger.exception("Webhook processing failed: %s", error)
+            return Response(status_code=500, content="processing error")
+        return Response(status_code=200, content="ok")
 
     @app.get("/api/best")
     async def api_best(request: Request, q: str = "") -> Response:
@@ -697,3 +798,137 @@ def _clean_optional(value: object) -> str | None:
         return None
     cleaned = str(value).strip()
     return cleaned or None
+
+
+# --------------------------------------------------------------------------
+# Middleware / observability helpers
+# --------------------------------------------------------------------------
+
+class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Adds baseline security headers. These are cheap in response time and
+    prevent entire classes of UI vulnerabilities (clickjacking,
+    content-type sniffing) even on otherwise correct applications."""
+
+    async def dispatch(self, request: Request, call_next):  # type: ignore[override]
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        return response
+
+
+class _RateLimitMiddleware(BaseHTTPMiddleware):
+    """Per-IP token-bucket limiter for public JSON API endpoints. We only apply
+    it to /api/* so that webhooks, health, and the HTML app (which already has
+    session auth) are unaffected. The bucket is in-memory, single-process; if
+    you run multiple web replicas put a real rate limiter at the edge."""
+
+    def __init__(self, app, deps: WebDependencies) -> None:  # type: ignore[no-untyped-def]
+        super().__init__(app)
+        self._deps = deps
+        # Token bucket parameters: allow the configured per-minute budget with
+        # burst up to the same value; refill monotonically.
+        from app.adapters.rate_limit import TokenBucketRateLimiter
+
+        rpm = max(1, int(deps.api_rate_limit_per_minute))
+        self._limiter = TokenBucketRateLimiter(
+            capacity=rpm,
+            refill_per_second=rpm / 60.0,
+        )
+
+    async def dispatch(self, request: Request, call_next):  # type: ignore[override]
+        if not request.url.path.startswith("/api/"):
+            return await call_next(request)
+        client = request.client
+        key_value = 0
+        if client is not None and client.host:
+            key_value = _stable_ip_key(client.host)
+        if not self._limiter.allow(key_value):
+            return JSONResponse(status_code=429, content={"error": "rate_limited"})
+        return await call_next(request)
+
+
+def _stable_ip_key(host: str) -> int:
+    # TokenBucket stores buckets keyed by int. We hash the IP into a stable
+    # unsigned 62-bit integer so the same IP always hits the same bucket.
+    import hashlib
+
+    digest = hashlib.sha1(host.encode("utf-8"), usedforsecurity=False).digest()
+    return int.from_bytes(digest[:8], "big") & ((1 << 62) - 1)
+
+
+class _MetricsRegistry:
+    """Thin wrapper around prometheus_client collectors used by LoggingMiddleware
+    and OCR adapters to update counters without importing prometheus_client
+    at every call site."""
+
+    def __init__(self) -> None:
+        from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram
+
+        self.registry = CollectorRegistry(auto_describe=True)
+        self.requests_total = Counter(
+            "cashback_bot_requests_total",
+            "Handler invocations by handler and status",
+            ["handler", "status"],
+            registry=self.registry,
+        )
+        self.request_duration = Histogram(
+            "cashback_bot_request_duration_seconds",
+            "Handler latency distribution",
+            ["handler"],
+            registry=self.registry,
+        )
+        self.ocr_calls_total = Counter(
+            "cashback_bot_ocr_calls_total",
+            "OCR calls by provider and result",
+            ["provider", "result"],
+            registry=self.registry,
+        )
+        self.active_users = Gauge(
+            "cashback_bot_active_users_total",
+            "Unique users seen in the current process window",
+            registry=self.registry,
+        )
+        self._seen_users: set[int] = set()
+
+    def observe_user(self, user_id: int) -> None:
+        if user_id in self._seen_users:
+            return
+        self._seen_users.add(user_id)
+        self.active_users.set(len(self._seen_users))
+
+
+def _build_metrics_registry() -> _MetricsRegistry:
+    return _MetricsRegistry()
+
+
+async def _check_db(deps: WebDependencies) -> str:
+    ping = deps.db_ping
+    if ping is None:
+        return "n/a"
+    import asyncio
+
+    try:
+        result = ping()
+        if asyncio.iscoroutine(result):
+            await asyncio.wait_for(result, timeout=2.0)
+        return "ok"
+    except Exception as error:
+        logger.warning("Health DB ping failed: %s", error)
+        return "error"
+
+
+async def _check_telegram(deps: WebDependencies) -> str:
+    ping = deps.telegram_ping
+    if ping is None:
+        return "n/a"
+    import asyncio
+
+    try:
+        result = ping()
+        if asyncio.iscoroutine(result):
+            await asyncio.wait_for(result, timeout=3.0)
+        return "ok"
+    except Exception as error:
+        logger.warning("Health Telegram ping failed: %s", error)
+        return "error"

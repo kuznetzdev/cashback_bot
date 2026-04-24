@@ -61,21 +61,48 @@ async def run_app() -> None:
 
     tasks: list[asyncio.Task[None]] = []
     telegram_facade = None
+    bot: Bot | None = None
+    dispatcher: Dispatcher | None = None
+    use_webhook = settings.app_enable_telegram and settings.app_enable_web and settings.webhook_enabled
     if settings.app_enable_telegram:
         bot = Bot(token=settings.bot_token)
         reminder_sender = TelegramReminderSender(bot=bot, localizer=localizer)
         telegram_facade = build_application_facade(core, reminder_sender)
-        tasks.append(
-            asyncio.create_task(
-                _run_telegram_adapter(
-                    settings=settings,
-                    bot=bot,
-                    facade=telegram_facade,
-                    localizer=localizer,
-                ),
-                name="telegram-adapter",
+        if use_webhook:
+            # Build the dispatcher here so the web app can feed updates directly
+            # into it instead of running polling. The reminder loop still runs
+            # as a side task so monthly reminders fire under webhook mode too.
+            dispatcher = _build_dispatcher(
+                settings=settings,
+                facade=telegram_facade,
+                localizer=localizer,
             )
-        )
+            reminder_loop = ReminderLoop(telegram_facade.send_monthly_reminders)
+            reminder_loop.start()
+            tasks.append(
+                asyncio.create_task(
+                    _run_webhook_adapter(
+                        settings=settings,
+                        bot=bot,
+                        dp=dispatcher,
+                        localizer=localizer,
+                        reminder_loop=reminder_loop,
+                    ),
+                    name="telegram-webhook-adapter",
+                )
+            )
+        else:
+            tasks.append(
+                asyncio.create_task(
+                    _run_telegram_adapter(
+                        settings=settings,
+                        bot=bot,
+                        facade=telegram_facade,
+                        localizer=localizer,
+                    ),
+                    name="telegram-adapter",
+                )
+            )
     if settings.app_enable_web:
         web_facade = telegram_facade or build_application_facade(core, NoopReminderSender())
         web_deps = WebDependencies(
@@ -90,6 +117,17 @@ async def run_app() -> None:
             max_upload_size=min(settings.web_max_upload_size, settings.max_file_size),
             secure_cookies=settings.web_secure_cookies,
             session_secret=settings.web_session_secret,
+            webhook_path=settings.webhook_path,
+            webhook_secret=settings.webhook_secret,
+            bot=bot if use_webhook else None,
+            dispatcher=dispatcher if use_webhook else None,
+            cors_origins=settings.cors_origins,
+            metrics_token=settings.metrics_token,
+            api_rate_limit_per_minute=settings.api_rate_limit_per_minute,
+            db_ping=_make_db_ping(core.engine),
+            telegram_ping=_make_telegram_ping(bot) if bot is not None else None,
+            ocr_provider_name=settings.ocr_provider,
+            app_version=_resolve_app_version(),
         )
         web_app = create_web_app(web_deps)
         tasks.append(
@@ -178,13 +216,15 @@ async def _await_until_shutdown_or_failure(
             raise exc
 
 
-async def _run_telegram_adapter(
+def _build_dispatcher(
     *,
     settings: Settings,
-    bot: Bot,
     facade: ApplicationFacade,
     localizer: Localizer,
-) -> None:
+) -> Dispatcher:
+    """Factor out dispatcher/router construction so polling and webhook modes
+    share the identical wiring. The only thing that changes between them is
+    how updates reach this dispatcher."""
     dp = Dispatcher(storage=build_fsm_storage(settings))
     renderer = TelegramScreenRenderer(localizer=localizer)
     telegram_deps = TelegramDependencies(
@@ -198,10 +238,28 @@ async def _run_telegram_adapter(
         photo_rate_limiter=TokenBucketRateLimiter(capacity=5, refill_per_second=0.1),
     )
     dp.include_router(build_router(telegram_deps))
+    return dp
+
+
+async def _run_telegram_adapter(
+    *,
+    settings: Settings,
+    bot: Bot,
+    facade: ApplicationFacade,
+    localizer: Localizer,
+) -> None:
+    dp = _build_dispatcher(settings=settings, facade=facade, localizer=localizer)
     reminder_loop = ReminderLoop(facade.send_monthly_reminders)
     reminder_loop.start()
     try:
         await _publish_bot_command_menu(bot=bot, localizer=localizer, default_language=settings.lang_default)
+        # Make sure no old webhook is lingering — switching from webhook back to
+        # polling without deleting it leaves Telegram sending updates to a URL
+        # that now 404s, while polling returns nothing.
+        try:
+            await bot.delete_webhook(drop_pending_updates=False)
+        except Exception as error:  # pragma: no cover - best-effort cleanup
+            logger.debug("delete_webhook() pre-poll failed: %s", error)
         await _run_polling_with_retry(
             dp=dp,
             bot=bot,
@@ -211,6 +269,71 @@ async def _run_telegram_adapter(
         await reminder_loop.stop()
         await dp.storage.close()
         await bot.session.close()
+
+
+async def _run_webhook_adapter(
+    *,
+    settings: Settings,
+    bot: Bot,
+    dp: Dispatcher,
+    localizer: Localizer,
+    reminder_loop: ReminderLoop,
+) -> None:
+    """Register the webhook with Telegram and then keep the adapter task alive
+    so the shared shutdown path can tear down the reminder loop and bot
+    session cleanly. The FastAPI app is the one actually dispatching updates."""
+    try:
+        await _publish_bot_command_menu(
+            bot=bot, localizer=localizer, default_language=settings.lang_default
+        )
+        url = f"{settings.web_base_url.rstrip('/')}{settings.webhook_path}"
+        await bot.set_webhook(
+            url=url,
+            secret_token=settings.webhook_secret or None,
+            drop_pending_updates=True,
+        )
+        logger.info("Webhook set: %s", url)
+        # Park the task — the FastAPI app does the actual dispatch. We only
+        # exit when cancelled (shutdown) or if the bot session dies.
+        await asyncio.Event().wait()
+    finally:
+        try:
+            await bot.delete_webhook(drop_pending_updates=False)
+        except Exception as error:  # pragma: no cover - best-effort
+            logger.debug("delete_webhook() on shutdown failed: %s", error)
+        await reminder_loop.stop()
+        await dp.storage.close()
+        await bot.session.close()
+
+
+def _make_db_ping(engine: AsyncEngine):  # type: ignore[no-untyped-def]
+    async def ping() -> None:
+        async with engine.connect() as connection:
+            await connection.execute(text("SELECT 1"))
+
+    return ping
+
+
+def _make_telegram_ping(bot: Bot):  # type: ignore[no-untyped-def]
+    async def ping() -> None:
+        await bot.get_me()
+
+    return ping
+
+
+def _resolve_app_version() -> str:
+    try:
+        import subprocess
+
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=2,
+        )
+        if out.returncode == 0:
+            return out.stdout.strip() or "dev"
+    except Exception:  # pragma: no cover - best-effort
+        pass
+    return "dev"
 
 
 async def _publish_bot_command_menu(*, bot: Bot, localizer: Localizer, default_language: str) -> None:
