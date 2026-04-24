@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections import OrderedDict
 
 from rapidfuzz import process
 
@@ -380,6 +381,16 @@ class CategoryService:
         self._term_to_slug["groceries"] = "supermarkets"
         self._term_to_slug["продукты"] = "supermarkets"
         self._term_to_slug["продукты питания"] = "supermarkets"
+        # LRU-evicted cache for normalize() results. Sized to comfortably hold
+        # every realistic OCR category phrase users send (bank UIs have ~dozens
+        # of distinct category strings per language). Keyed by the raw input so
+        # two callers with the same prompt share the hit.
+        self._normalize_cache: OrderedDict[str, NormalizedCategory] = OrderedDict()
+        self._normalize_cache_maxsize = 2048
+        # Diagnostics hit counters — exposed via :meth:`cache_stats` so tests
+        # and ops can confirm the cache is actually taking load.
+        self._cache_hits = 0
+        self._cache_misses = 0
 
     @staticmethod
     def _normalize_text(value: str) -> str:
@@ -416,6 +427,15 @@ class CategoryService:
         return f"{head}_{suffix}" if head else suffix
 
     def normalize(self, raw: str) -> NormalizedCategory:
+        # Cache on the raw input: fast path avoids the expensive rapidfuzz
+        # extraction, which runs on every OCR token and can cost milliseconds
+        # for long strings. Re-insert on hit to preserve LRU order.
+        cached = self._normalize_cache.get(raw)
+        if cached is not None:
+            self._cache_hits += 1
+            self._normalize_cache.move_to_end(raw)
+            return cached
+        self._cache_misses += 1
         normalized_raw = self._normalize_text(raw)
         slug = self._term_to_slug.get(normalized_raw)
         if slug is None:
@@ -424,9 +444,29 @@ class CategoryService:
                 slug = self._term_to_slug[fuzzy[0]]
         if slug is None:
             title = raw.strip().title()
-            return NormalizedCategory(slug=self._slugify(raw), display_ru=title, display_en=title)
-        definition = self._definitions[slug]
-        return NormalizedCategory(slug=slug, display_ru=definition["ru"], display_en=definition["en"])
+            result = NormalizedCategory(slug=self._slugify(raw), display_ru=title, display_en=title)
+        else:
+            definition = self._definitions[slug]
+            result = NormalizedCategory(slug=slug, display_ru=definition["ru"], display_en=definition["en"])
+        self._normalize_cache[raw] = result
+        if len(self._normalize_cache) > self._normalize_cache_maxsize:
+            # Evict the least-recently-used entry — the first in OrderedDict.
+            self._normalize_cache.popitem(last=False)
+        return result
+
+    def cache_stats(self) -> dict[str, int]:
+        """Return cache counters for tests and operational diagnostics."""
+        return {
+            "hits": self._cache_hits,
+            "misses": self._cache_misses,
+            "size": len(self._normalize_cache),
+        }
+
+    def clear_cache(self) -> None:
+        """Reset the cache — primarily for test isolation."""
+        self._normalize_cache.clear()
+        self._cache_hits = 0
+        self._cache_misses = 0
 
     def display_name(self, slug: str, language: str) -> str:
         definition = self._definitions.get(slug)

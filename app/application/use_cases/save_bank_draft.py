@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from app.application.contracts.ports import UnitOfWorkPort
+from app.application.use_cases.ranking_snapshot import RankingSnapshotUseCase
 from app.domain.errors import ValidationError
 from app.domain.models import CashbackDraftItem
 
@@ -39,4 +40,7 @@ class SaveBankDraftUseCase:
             await uow.cashback.replace_for_bank(bank.id, items)
             await uow.logs.add(user_id, "bank_added" if created else "bank_updated", {"bank_id": bank.id, "bank_name": bank.bank_name})
             await uow.commit()
+            # Drop any cached ranking snapshot for this user so the next inline
+            # query / /top shows the new items immediately.
+            RankingSnapshotUseCase.invalidate(user_id)
             return bank.id

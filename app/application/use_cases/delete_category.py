@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from app.application.contracts.ports import UnitOfWorkPort
+from app.application.use_cases.ranking_snapshot import RankingSnapshotUseCase
 from app.domain.errors import NotFoundError
 from app.domain.services.categories import CategoryService
 
@@ -36,4 +37,5 @@ class DeleteCategoryUseCase:
                 {"query": query, "deleted_items": total_deleted, "affected_banks": affected_banks},
             )
             await uow.commit()
+        RankingSnapshotUseCase.invalidate(user_id)
         return total_deleted, affected_banks
