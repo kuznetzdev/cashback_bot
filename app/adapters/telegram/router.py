@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
+from collections.abc import Awaitable, Coroutine
 from dataclasses import dataclass
+from typing import Any
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
@@ -145,21 +148,30 @@ def build_router(deps: TelegramDependencies) -> Router:
             photo = message.photo[-1]
             buffer = io.BytesIO()
             await message.bot.download(photo, destination=buffer)
-            await _handle_event(
-                deps=deps,
-                event=message,
-                state=state,
-                command=UserCommand(
-                    name="submit_uploaded_image",
-                    payload={
-                        "upload": ImageUpload(
-                            content=buffer.getvalue(),
-                            filename=f"telegram_{photo.file_unique_id}.jpg",
-                            content_type="image/jpeg",
-                        )
-                    },
+            # Keep the "typing..." indicator alive while OCR + downstream work
+            # run — it naturally expires after ~5s, so we repeat until the
+            # coroutine finishes. The status sticker above is visible content
+            # reassurance; the chat_action is what Telegram shows in the
+            # conversation header.
+            await _with_typing(
+                bot=message.bot,
+                chat_id=message.chat.id,
+                coro=_handle_event(
+                    deps=deps,
+                    event=message,
+                    state=state,
+                    command=UserCommand(
+                        name="submit_uploaded_image",
+                        payload={
+                            "upload": ImageUpload(
+                                content=buffer.getvalue(),
+                                filename=f"telegram_{photo.file_unique_id}.jpg",
+                                content_type="image/jpeg",
+                            )
+                        },
+                    ),
+                    known_user=user,
                 ),
-                known_user=user,
             )
         except (RuntimeError, OSError) as error:
             logger.exception("Photo flow failed: %s", error)
@@ -471,3 +483,47 @@ async def _answer_callback_safely(event: Message | CallbackQuery) -> None:
         await event.answer()
     except TelegramBadRequest:
         return
+
+
+async def _with_typing(*, bot: Any, chat_id: int, coro: Coroutine[Any, Any, Any]) -> Any:
+    """Run ``coro`` while repeatedly sending the "typing" chat action.
+
+    Telegram's chat action expires after ~5 seconds, so for long OCR work
+    (Tesseract preprocessing + OpenAI Vision can easily take 10+ seconds
+    together) we refresh it on a 4s interval. The refresh task is cancelled
+    the moment ``coro`` returns or raises, guaranteeing no stale background
+    tasks leak out when the handler exits.
+    """
+    stop_event = asyncio.Event()
+
+    async def _keep_typing() -> None:
+        try:
+            # Fire-and-forget the first action so the indicator appears
+            # immediately, not after the 4-second delay.
+            try:
+                await bot.send_chat_action(chat_id, "typing")
+            except Exception:
+                return
+            while not stop_event.is_set():
+                try:
+                    await asyncio.wait_for(stop_event.wait(), timeout=4.0)
+                    return
+                except asyncio.TimeoutError:
+                    try:
+                        await bot.send_chat_action(chat_id, "typing")
+                    except Exception:
+                        # Network flake / permissions removed — stop pinging.
+                        return
+        except asyncio.CancelledError:  # pragma: no cover - expected on shutdown
+            return
+
+    refresher = asyncio.create_task(_keep_typing(), name="telegram-typing-refresher")
+    try:
+        return await coro
+    finally:
+        stop_event.set()
+        refresher.cancel()
+        try:
+            await refresher
+        except (asyncio.CancelledError, Exception):
+            pass

@@ -32,7 +32,7 @@
     "web_login_hint": "Sign in with Telegram and manage cashback categories from phone or desktop.",
     "web_auth_hint": "Sign in with a local account. Telegram remains available as an optional linked identity.",
     "upload_hint": "Upload a screenshot from your banking app. Crop extra regions for better OCR.",
-    "ocr_hint": "Hint: crop the screenshot, increase contrast, and try again.",
+    "ocr_hint": "Could not read any categories from the photo. Make sure the text is clear and not cropped. Try a fresh screenshot from the bank app, or tap \"Try again\".",
     "confirm_discard_draft": "You have unsaved changes.\nChoose what to do before going to {target}.",
     "draft_discarded": "Draft was discarded.",
     "no_ranking_data_onboarding": "No ranking data yet. Add your first bank and its cashback offers to get recommendations on where to pay."

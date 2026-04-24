@@ -154,8 +154,20 @@ def test_web_photo_flow_uses_bytes_upload_contract(uow_factory, dummy_ocr, tmp_p
     response = client.post("/app/upload", files={"file": ("screen.png", buffer.getvalue(), "image/png")})
 
     assert response.status_code == 200
-    assert "Подсказка" in response.text or "Hint" in response.text
-    assert "распознать текст" in response.text or "recognize text" in response.text
+    # The hint should surface either the old "Подсказка/Hint" string or the
+    # new actionable guidance introduced with the typing-indicator UX work.
+    assert any(
+        marker in response.text
+        for marker in (
+            "Подсказка",
+            "Hint",
+            "Попробуй",
+            "Try again",
+            "чёткий",
+            "cropped",
+        )
+    )
+    assert "распознать текст" in response.text or "read any categories" in response.text
 
 
 def test_web_telegram_callback_resolves_linked_identity(uow_factory, dummy_ocr, tmp_path: Path, store) -> None:
