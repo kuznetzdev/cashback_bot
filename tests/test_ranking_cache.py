@@ -48,9 +48,7 @@ async def test_repeated_execute_serves_from_cache_within_ttl() -> None:
         await use_case.execute(user_id=1, language="ru")
         await use_case.execute(user_id=1, language="ru", query="АЗС")
         await use_case.execute(user_id=1, language="ru", query="")
-    assert fetch.await_count == 1, (
-        "Second + third execute() must serve entries from cache, not the DB"
-    )
+    assert fetch.await_count == 1, "Second + third execute() must serve entries from cache, not the DB"
 
 
 @pytest.mark.asyncio

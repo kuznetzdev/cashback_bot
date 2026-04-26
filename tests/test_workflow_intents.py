@@ -107,7 +107,11 @@ async def test_delete_bank_text_intent_deletes_bank_and_returns_home(uow_factory
         user_id=user.id,
         bank_id=None,
         bank_name="T-Bank",
-        items=[CashbackDraftItem(raw_category="Fuel", normalized_category="fuel", percent=Decimal("5"), source_type="manual")],
+        items=[
+            CashbackDraftItem(
+                raw_category="Fuel", normalized_category="fuel", percent=Decimal("5"), source_type="manual"
+            )
+        ],
     )
 
     result = await route_text(deps, user, WorkflowState(), "delete bank T-Bank")
@@ -127,7 +131,14 @@ async def test_delete_category_text_intent_returns_summary_screen(uow_factory, d
         user_id=user.id,
         bank_id=None,
         bank_name="T-Bank",
-        items=[CashbackDraftItem(raw_category="Fuel", normalized_category=categories.normalize("Fuel").slug, percent=Decimal("5"), source_type="manual")],
+        items=[
+            CashbackDraftItem(
+                raw_category="Fuel",
+                normalized_category=categories.normalize("Fuel").slug,
+                percent=Decimal("5"),
+                source_type="manual",
+            )
+        ],
     )
 
     result = await route_text(deps, user, WorkflowState(), "delete category fuel")
@@ -147,4 +158,7 @@ async def test_unknown_text_returns_help_with_status_effect(uow_factory, dummy_o
     result = await route_text(deps, user, WorkflowState(), "abracadabra")
 
     assert result.screen.id == "help"
-    assert any(effect.kind == "show_status" and effect.payload["message_key"] == "errors.unknown_command" for effect in result.effects)
+    assert any(
+        effect.kind == "show_status" and effect.payload["message_key"] == "errors.unknown_command"
+        for effect in result.effects
+    )

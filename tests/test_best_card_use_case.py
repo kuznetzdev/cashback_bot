@@ -10,7 +10,7 @@ from app.domain.services.categories import CategoryService
 from app.domain.services.ranking import RankingService
 
 
-@pytest.fixture()
+@pytest.fixture
 def use_case(uow_factory):
     categories = CategoryService()
     ranking = RankingService(categories)

@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from app.application.auth.models import ExternalIdentityContext, LocalAuthenticationCommand, LocalRegistrationCommand
+from app.application.auth.models import (
+    ExternalIdentityContext,
+    LocalAuthenticationCommand,
+    LocalRegistrationCommand,
+)
 from app.application.auth.normalization import normalize_email, normalize_username
 from app.application.auth.passwords import PasswordHasherPort
 from app.application.contracts.ports import UnitOfWorkPort
@@ -11,7 +15,12 @@ from app.domain.models import UserAccount, UserIdentity
 
 
 class RegisterLocalUserUseCase:
-    def __init__(self, uow_factory: Callable[[], UnitOfWorkPort], password_hasher: PasswordHasherPort, default_language: str) -> None:
+    def __init__(
+        self,
+        uow_factory: Callable[[], UnitOfWorkPort],
+        password_hasher: PasswordHasherPort,
+        default_language: str,
+    ) -> None:
         self.uow_factory = uow_factory
         self.password_hasher = password_hasher
         self.default_language = default_language
@@ -44,7 +53,9 @@ class RegisterLocalUserUseCase:
 
 
 class AuthenticateLocalUserUseCase:
-    def __init__(self, uow_factory: Callable[[], UnitOfWorkPort], password_hasher: PasswordHasherPort) -> None:
+    def __init__(
+        self, uow_factory: Callable[[], UnitOfWorkPort], password_hasher: PasswordHasherPort
+    ) -> None:
         self.uow_factory = uow_factory
         self.password_hasher = password_hasher
 
@@ -52,7 +63,9 @@ class AuthenticateLocalUserUseCase:
         username = normalize_username(command.username)
         async with self.uow_factory() as uow:
             credentials = await uow.credentials.get_by_username(username)
-            if credentials is None or not self.password_hasher.verify_password(command.password, credentials.password_hash):
+            if credentials is None or not self.password_hasher.verify_password(
+                command.password, credentials.password_hash
+            ):
                 raise ValidationError("errors.invalid_credentials")
             user = await uow.users.get_by_id(credentials.user_id)
             if user is None:

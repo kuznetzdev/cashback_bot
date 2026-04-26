@@ -56,11 +56,11 @@ def test_recovery_for_plain_command_error_stays_minimal() -> None:
 def test_ocr_retryable_keys_covers_all_three_documented_error_keys() -> None:
     # Keep the retryable set in sync with the keys raised by TesseractOCRAdapter
     # and OpenAIVisionOCRAdapter so the retry button is offered when appropriate.
-    assert _OCR_RETRYABLE_KEYS == {
+    assert {
         "errors.ocr_timeout",
         "errors.ocr_empty",
         "errors.broken_image",
-    }
+    } == _OCR_RETRYABLE_KEYS
 
 
 def test_deep_link_payload_inline_setup_opens_add_bank() -> None:

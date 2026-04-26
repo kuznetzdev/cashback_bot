@@ -13,6 +13,7 @@ A correlation id is injected by ``app.bootstrap.correlation.correlation_id_var``
 (set by telegram and web middleware). It appears on every log record under
 ``correlation_id`` so a single update can be traced across adapters.
 """
+
 from __future__ import annotations
 
 import logging
@@ -24,9 +25,7 @@ import structlog
 from app.bootstrap.correlation import correlation_id_var
 
 
-def _add_correlation_id(
-    logger: Any, method_name: str, event_dict: dict[str, Any]
-) -> dict[str, Any]:
+def _add_correlation_id(logger: Any, method_name: str, event_dict: dict[str, Any]) -> dict[str, Any]:
     _ = logger, method_name
     cid = correlation_id_var.get()
     if cid:

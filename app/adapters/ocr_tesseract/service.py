@@ -94,9 +94,7 @@ class TesseractOCRAdapter(OCRPort):
             # SHARPEN kernel — especially for thin Cyrillic strokes at small
             # sizes. Threshold=3 ignores the tiny noise the autocontrast step
             # would otherwise amplify.
-            sharpened = contrasted.filter(
-                ImageFilter.UnsharpMask(radius=1.5, percent=180, threshold=3)
-            )
+            sharpened = contrasted.filter(ImageFilter.UnsharpMask(radius=1.5, percent=180, threshold=3))
             denoised = sharpened.filter(ImageFilter.MedianFilter(size=3))
             denoised.save(target_path, format="PNG")
 

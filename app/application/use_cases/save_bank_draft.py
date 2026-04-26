@@ -8,7 +8,6 @@ from app.application.use_cases.ranking_snapshot import RankingSnapshotUseCase
 from app.domain.errors import ValidationError
 from app.domain.models import CashbackDraftItem
 
-
 # Hard limits — chosen to cover any plausible real-world bank offer while
 # capping pathological inputs that would bloat the DB or break the UI.
 _MAX_BANK_NAME_LENGTH = 80
@@ -71,7 +70,11 @@ class SaveBankDraftUseCase:
             else:
                 await uow.banks.update_name(bank.id, bank_name)
             await uow.cashback.replace_for_bank(bank.id, items)
-            await uow.logs.add(user_id, "bank_added" if created else "bank_updated", {"bank_id": bank.id, "bank_name": bank.bank_name})
+            await uow.logs.add(
+                user_id,
+                "bank_added" if created else "bank_updated",
+                {"bank_id": bank.id, "bank_name": bank.bank_name},
+            )
             await uow.commit()
             # Drop any cached ranking snapshot for this user so the next inline
             # query / /top shows the new items immediately.

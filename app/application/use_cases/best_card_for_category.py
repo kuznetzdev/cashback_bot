@@ -43,11 +43,7 @@ class BestCardForCategoryUseCase:
         cleaned = (query or "").strip()
         normalized = self.categories.normalize(cleaned) if cleaned else None
         slug = normalized.slug if normalized else ""
-        display_name = (
-            self.categories.display_name(slug, language)
-            if slug
-            else cleaned or ""
-        )
+        display_name = self.categories.display_name(slug, language) if slug else cleaned or ""
         if not slug:
             return BestCardResult(
                 query=cleaned,

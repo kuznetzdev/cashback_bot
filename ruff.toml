@@ -1,0 +1,50 @@
+# Project-wide ruff configuration shared between local runs and CI.
+# Kept conservative on first introduction so legacy code can be cleaned
+# incrementally rather than blocking every contributor.
+
+target-version = "py311"
+line-length = 110
+src = ["app", "tests"]
+
+[lint]
+# Enabled rule families:
+# - E/W: pycodestyle errors / warnings (the basics).
+# - F:   pyflakes (undefined names, unused imports — high-signal).
+# - I:   isort (import sorting — keeps diffs clean).
+# - B:   bugbear (likely-real bugs without false-positive overhead).
+# - UP:  pyupgrade (modernise stdlib idioms — opt-in to py3.11+).
+# - SIM: simple comprehension/control-flow simplifications.
+# - PT:  pytest-specific patterns.
+select = ["E", "W", "F", "I", "B", "UP", "SIM", "PT"]
+
+ignore = [
+    # Long-line allowance is enforced by line-length, not E501. Letting
+    # line-length be the single knob avoids ruff and our editor disagreeing.
+    "E501",
+    # Allow long mutable defaults in dataclasses where we use field().
+    "B008",
+    # E731 banned lambdas — we have a few legitimate one-shot uses.
+    "E731",
+    # SIM117 wants merged with-statements; less readable for long blocks.
+    "SIM117",
+    # B904 (raise from) is good but legacy code lacks it; address gradually.
+    "B904",
+    # PT011 wants pytest.raises(match=...); not always meaningful.
+    "PT011",
+]
+
+[lint.per-file-ignores]
+# Tests can use whatever import order, mock patterns, etc. The scope here is
+# "no real bugs", not "tests look exactly like production".
+"tests/**" = ["F401", "F841", "B011", "PT004", "PT012"]
+# Alembic migrations are auto-generated; let them be.
+"alembic/versions/**" = ["E", "W", "F", "I", "B", "UP", "SIM", "PT"]
+
+[lint.isort]
+known-first-party = ["app"]
+combine-as-imports = true
+
+[format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"

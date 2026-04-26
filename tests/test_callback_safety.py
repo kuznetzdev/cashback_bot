@@ -3,6 +3,7 @@
 on both layers — the slug producer (``CategoryService._slugify``) and the
 encoder (``encode_action``) — so regressions surface as test failures.
 """
+
 from __future__ import annotations
 
 from app.adapters.telegram.callbacks import _CALLBACK_DATA_MAX_BYTES, encode_action
@@ -65,7 +66,7 @@ def test_all_known_category_slugs_fit_in_callback_data() -> None:
     # limit without needing the hash fallback — the fallback is a safety net,
     # not an everyday path.
     service = CategoryService()
-    for slug in service._definitions.keys():
+    for slug in service._definitions:
         action = Action(
             command="open_top_category",
             label_key=slug,

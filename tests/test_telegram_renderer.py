@@ -19,7 +19,11 @@ def test_renderer_builds_keyboard_from_screen_actions() -> None:
         title_key="screens.input_method",
         body_key="screens.input_method",
         body_params={"bank_name": "T-Bank"},
-        actions=[Action(command="choose_input_method", label_key="buttons.input_manual", payload={"method": "manual"})],
+        actions=[
+            Action(
+                command="choose_input_method", label_key="buttons.input_manual", payload={"method": "manual"}
+            )
+        ],
     )
     keyboard = renderer._build_keyboard(screen, "en")
     assert keyboard is not None

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import io
 import logging
-from collections.abc import Awaitable, Coroutine
+from collections.abc import Coroutine
 from dataclasses import dataclass
 from typing import Any
 
@@ -104,7 +105,9 @@ def build_router(deps: TelegramDependencies) -> Router:
     async def on_callback(callback: CallbackQuery, state: FSMContext) -> None:
         if callback.data is None:
             await _answer_callback_safely(callback)
-            await deps.renderer.notify_error(callback, deps.localizer.t("errors.unknown_command", deps.default_language))
+            await deps.renderer.notify_error(
+                callback, deps.localizer.t("errors.unknown_command", deps.default_language)
+            )
             return
         try:
             command = decode_callback(callback.data)
@@ -144,7 +147,9 @@ def build_router(deps: TelegramDependencies) -> Router:
 
         status: Message | None = None
         try:
-            status = await deps.renderer.notify_status(message, deps.localizer.t("messages.processing", user.language))
+            status = await deps.renderer.notify_status(
+                message, deps.localizer.t("messages.processing", user.language)
+            )
             photo = message.photo[-1]
             buffer = io.BytesIO()
             await message.bot.download(photo, destination=buffer)
@@ -263,6 +268,124 @@ def build_router(deps: TelegramDependencies) -> Router:
             reset_state=True,
         )
 
+    @router.message(Command("export"))
+    async def on_export_command(message: Message, state: FSMContext) -> None:
+        _ = state
+        user = await _sync_user_only(deps, message)
+        try:
+            export = await deps.facade.export_user_data(user_id=user.id)
+        except RuntimeError as error:
+            logger.warning("Export use case unavailable: %s", error)
+            await deps.renderer.notify_error(
+                message,
+                deps.localizer.t("errors.unexpected", user.language),
+            )
+            return
+        # Render as a JSON document attached to the chat. The aiogram API
+        # accepts BufferedInputFile for in-memory bytes — no temp files,
+        # no on-disk leftovers. Caption explains what to do with the file.
+        import json as _json
+
+        from aiogram.types import BufferedInputFile
+
+        payload = _json.dumps(export.to_dict(), ensure_ascii=False, indent=2).encode("utf-8")
+        try:
+            file = BufferedInputFile(payload, filename="cashback_export.json")
+            await message.bot.send_document(
+                chat_id=message.chat.id,
+                document=file,
+                caption=deps.localizer.t("messages.export_caption", user.language),
+            )
+        except Exception as error:  # pragma: no cover - network resilience
+            logger.warning("Failed to send export document: %s", error)
+            # Fallback: send as text if the file path failed for some reason.
+            try:
+                snippet = payload.decode("utf-8")[:3500]
+                await message.answer(f"```json\n{snippet}\n```", parse_mode="Markdown")
+            except Exception:
+                await deps.renderer.notify_error(
+                    message,
+                    deps.localizer.t("errors.unexpected", user.language),
+                )
+
+    @router.message(F.document & F.document.file_name.endswith(".json"))
+    async def on_import_document(message: Message, state: FSMContext) -> None:
+        _ = state
+        user = await _sync_user_only(deps, message)
+        # Only accept import when the user issued /import within the same
+        # conversation (the FSM marker would be cleaner but a simple flag
+        # in user-data also works). For the v1.1 MVP we accept any JSON
+        # upload that the user explicitly sent — they're authenticated and
+        # the action is destructive only to their own data.
+        if message.document is None:
+            return
+        # Hard size cap on the document — a 1 MiB JSON is ~10× larger than
+        # any plausible export.
+        if (message.document.file_size or 0) > 1_048_576:
+            await deps.renderer.notify_error(
+                message,
+                deps.localizer.t("errors.file_too_large", user.language),
+            )
+            return
+        import io as _io
+
+        buffer = _io.BytesIO()
+        try:
+            await message.bot.download(message.document, destination=buffer)
+        except Exception as error:
+            logger.warning("Failed to download import document: %s", error)
+            await deps.renderer.notify_error(
+                message,
+                deps.localizer.t("errors.unexpected", user.language),
+            )
+            return
+        try:
+            text_payload = buffer.getvalue().decode("utf-8")
+        except UnicodeDecodeError:
+            await deps.renderer.notify_error(
+                message,
+                deps.localizer.t("errors.import_invalid_json", user.language),
+            )
+            return
+        try:
+            result = await deps.facade.import_user_data(user_id=user.id, payload=text_payload)
+        except DomainError as error:
+            await deps.renderer.notify_error(
+                message,
+                deps.localizer.t(error.message_key, user.language, error.payload),
+            )
+            return
+        except RuntimeError as error:
+            logger.warning("Import use case unavailable: %s", error)
+            await deps.renderer.notify_error(
+                message,
+                deps.localizer.t("errors.unexpected", user.language),
+            )
+            return
+        summary = deps.localizer.t(
+            "messages.import_summary",
+            user.language,
+            {
+                "banks": result.banks_imported,
+                "items": result.items_imported,
+                "skipped_banks": len(result.skipped_banks),
+                "skipped_items": len(result.skipped_items),
+            },
+        )
+        try:
+            await message.answer(summary)
+        except Exception as error:  # pragma: no cover
+            logger.debug("Import summary post failed: %s", error)
+        # Route into the home screen so the new banks are visible right away.
+        await _handle_event(
+            deps=deps,
+            event=message,
+            state=state,
+            command=UserCommand(name="open_home"),
+            known_user=user,
+            reset_state=True,
+        )
+
     @router.inline_query()
     async def on_inline(query: InlineQuery) -> None:
         inline_deps = InlineDependencies(
@@ -303,8 +426,12 @@ async def _handle_event(
         workflow = await load_workflow_state(state)
         result = await deps.facade.handle_command(user, workflow, command)
         await save_workflow_state(state, result.state)
-        await deps.renderer.render(event=event, state=state, screen=result.screen, language=result.user.language)
-        await _apply_effects(deps=deps, event=event, user=result.user, language=result.user.language, effects=result.effects)
+        await deps.renderer.render(
+            event=event, state=state, screen=result.screen, language=result.user.language
+        )
+        await _apply_effects(
+            deps=deps, event=event, user=result.user, language=result.user.language, effects=result.effects
+        )
     except DomainError as error:
         logger.info("Domain error: %s", error.message_key)
         await _safe_log_event(
@@ -413,10 +540,7 @@ async def _sync_user_only(
     *,
     log_action: str | None = None,
 ) -> UserAccount:
-    if isinstance(event, Message):
-        from_user = event.from_user
-    else:
-        from_user = event.from_user
+    from_user = event.from_user if isinstance(event, Message) else event.from_user
     if from_user is None:
         raise RuntimeError("Update does not have from_user")
     identity = ExternalIdentityContext(
@@ -464,7 +588,9 @@ async def _apply_effects(
                 if not message_key:
                     continue
                 text = deps.localizer.t(message_key, language, effect.payload)
-                await deps.renderer.notify_status(event, text, delete_after=bool(effect.payload.get("transient", False)))
+                await deps.renderer.notify_status(
+                    event, text, delete_after=bool(effect.payload.get("transient", False))
+                )
                 continue
             if effect.kind == "log_event":
                 action = str(effect.payload.get("action", ""))
@@ -524,7 +650,7 @@ async def _with_typing(*, bot: Any, chat_id: int, coro: Coroutine[Any, Any, Any]
                 try:
                     await asyncio.wait_for(stop_event.wait(), timeout=4.0)
                     return
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     try:
                         await bot.send_chat_action(chat_id, "typing")
                     except Exception:
@@ -539,7 +665,5 @@ async def _with_typing(*, bot: Any, chat_id: int, coro: Coroutine[Any, Any, Any]
     finally:
         stop_event.set()
         refresher.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError, Exception):
             await refresher
-        except (asyncio.CancelledError, Exception):
-            pass

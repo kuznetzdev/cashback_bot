@@ -3,7 +3,19 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -100,9 +112,7 @@ class CashbackItemModel(Base):
     source_type: Mapped[str] = mapped_column(String(16), nullable=False)
     # Optional monthly cashback cap. Numeric(12, 2) covers any plausible
     # ruble amount up to 9_999_999_999.99 — well over any real-world cap.
-    monthly_limit: Mapped[Decimal | None] = mapped_column(
-        Numeric(12, 2), nullable=True, default=None
-    )
+    monthly_limit: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(), nullable=False, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(), nullable=False, default=utcnow, onupdate=utcnow)
 

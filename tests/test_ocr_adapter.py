@@ -3,8 +3,8 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-import pytest
 import pytesseract
+import pytest
 from PIL import Image
 
 from app.adapters.ocr_tesseract.service import TesseractOCRAdapter
@@ -17,7 +17,9 @@ def _upload_from_path(path: Path, *, content_type: str = "image/png") -> ImageUp
 
 
 @pytest.mark.asyncio
-async def test_ocr_adapter_extracts_text_with_stubbed_engine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_ocr_adapter_extracts_text_with_stubbed_engine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     image_path = tmp_path / "sample.png"
     Image.new("RGB", (80, 40), color="white").save(image_path, format="PNG")
 
@@ -46,7 +48,11 @@ async def test_ocr_adapter_rejects_large_files(tmp_path: Path) -> None:
     )
     with pytest.raises(ValidationError) as error:
         await adapter.extract_text(
-            ImageUpload(content=large_file.read_bytes(), filename=large_file.name, content_type="application/octet-stream")
+            ImageUpload(
+                content=large_file.read_bytes(),
+                filename=large_file.name,
+                content_type="application/octet-stream",
+            )
         )
     assert error.value.message_key == "errors.file_too_large"
 
@@ -63,12 +69,16 @@ async def test_ocr_adapter_handles_broken_image(tmp_path: Path) -> None:
         temp_dir=tmp_path / "ocr",
     )
     with pytest.raises(ValidationError) as error:
-        await adapter.extract_text(ImageUpload(content=broken.read_bytes(), filename=broken.name, content_type="image/jpeg"))
+        await adapter.extract_text(
+            ImageUpload(content=broken.read_bytes(), filename=broken.name, content_type="image/jpeg")
+        )
     assert error.value.message_key == "errors.broken_image"
 
 
 @pytest.mark.asyncio
-async def test_ocr_adapter_timeout_maps_to_validation_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_ocr_adapter_timeout_maps_to_validation_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     image_path = tmp_path / "slow.png"
     Image.new("RGB", (80, 40), color="white").save(image_path, format="PNG")
 

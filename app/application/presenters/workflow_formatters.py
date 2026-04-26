@@ -18,7 +18,9 @@ def format_history_entries(logs: list[UserLogEntry]) -> str:
 
 
 def format_ranking(leaders: list[CategoryLeader], global_rating: list[BankScore]) -> tuple[str, str]:
-    leaders_text = "\n".join(f"- {item.category_name}: {item.best_percent}% ({', '.join(item.bank_names)})" for item in leaders)
+    leaders_text = "\n".join(
+        f"- {item.category_name}: {item.best_percent}% ({', '.join(item.bank_names)})" for item in leaders
+    )
     global_text = "\n".join(f"- {item.bank_name}: {item.score}" for item in global_rating)
     return leaders_text, global_text
 

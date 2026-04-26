@@ -8,7 +8,6 @@ from rapidfuzz import process
 
 from app.domain.models import NormalizedCategory
 
-
 # Telegram callback_data is capped at 64 bytes. Our callback keys have prefixes
 # up to ~20 bytes ("nav:top_category:"), so the slug portion must stay under
 # ~40 bytes to keep inline keyboards working. Slugs produced from known

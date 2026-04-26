@@ -4,7 +4,6 @@ import re
 
 from app.domain.errors import ValidationError
 
-
 USERNAME_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9._-]{1,30}[a-z0-9])?$")
 
 

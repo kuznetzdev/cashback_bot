@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from app.application.auth.models import ExternalIdentityContext, LocalAuthenticationCommand, LocalRegistrationCommand
+from app.application.auth.models import (
+    ExternalIdentityContext,
+    LocalAuthenticationCommand,
+    LocalRegistrationCommand,
+)
 from app.application.auth.use_cases import (
     AuthenticateExternalIdentityUseCase,
     AuthenticateLocalUserUseCase,
@@ -12,9 +16,11 @@ from app.application.auth.use_cases import (
 )
 from app.application.models import UserContext
 from app.application.use_cases.best_card_for_category import BestCardForCategoryUseCase, BestCardResult
+from app.application.use_cases.export_user_data import ExportedUser, ExportUserDataUseCase
 from app.application.use_cases.find_user_by_identity import FindUserByExternalIdentityUseCase
 from app.application.use_cases.get_ranking import GetRankingUseCase
 from app.application.use_cases.handle_command import HandleCommandUseCase
+from app.application.use_cases.import_user_data import ImportResult, ImportUserDataUseCase
 from app.application.use_cases.log_event import LogEventUseCase
 from app.application.use_cases.quick_add_bank import QuickAddBankUseCase, QuickAddResult
 from app.application.use_cases.ranking_snapshot import RankingSnapshot, RankingSnapshotUseCase
@@ -43,6 +49,8 @@ class ApplicationFacade:
         quick_add_bank_use_case: QuickAddBankUseCase,
         get_ranking_use_case: GetRankingUseCase,
         ranking_snapshot_use_case: RankingSnapshotUseCase,
+        export_user_data_use_case: ExportUserDataUseCase | None = None,
+        import_user_data_use_case: ImportUserDataUseCase | None = None,
     ) -> None:
         self.register_local_user_use_case = register_local_user_use_case
         self.authenticate_local_user_use_case = authenticate_local_user_use_case
@@ -60,6 +68,8 @@ class ApplicationFacade:
         self.quick_add_bank_use_case = quick_add_bank_use_case
         self.get_ranking_use_case = get_ranking_use_case
         self.ranking_snapshot_use_case = ranking_snapshot_use_case
+        self.export_user_data_use_case = export_user_data_use_case
+        self.import_user_data_use_case = import_user_data_use_case
 
     async def register_local_user(self, command: LocalRegistrationCommand) -> UserAccount:
         return await self.register_local_user_use_case.execute(command)
@@ -80,7 +90,9 @@ class ApplicationFacade:
             log_action=log_action,
         )
 
-    async def link_external_identity(self, *, user_id: int, identity: ExternalIdentityContext) -> UserIdentity:
+    async def link_external_identity(
+        self, *, user_id: int, identity: ExternalIdentityContext
+    ) -> UserIdentity:
         return await self.link_external_identity_use_case.execute(user_id=user_id, identity=identity)
 
     async def unlink_external_identity(self, *, user_id: int, provider: str) -> None:
@@ -95,7 +107,9 @@ class ApplicationFacade:
     async def sync_user(self, ctx: UserContext, *, log_action: str | None = None) -> UserAccount:
         return await self.sync_user_use_case.execute(ctx, log_action=log_action)
 
-    async def handle_command(self, user: UserAccount, state: WorkflowState, command: UserCommand) -> WorkflowResult:
+    async def handle_command(
+        self, user: UserAccount, state: WorkflowState, command: UserCommand
+    ) -> WorkflowResult:
         return await self.handle_command_use_case.execute(user, state, command)
 
     async def send_monthly_reminders(self) -> int:
@@ -135,6 +149,19 @@ class ApplicationFacade:
         return await self.get_ranking_use_case.top_by_category(user_id=user_id, language=language)
 
     async def ranking_snapshot(self, *, user_id: int, query: str, language: str) -> RankingSnapshot:
-        return await self.ranking_snapshot_use_case.execute(
-            user_id=user_id, query=query, language=language
-        )
+        return await self.ranking_snapshot_use_case.execute(user_id=user_id, query=query, language=language)
+
+    async def export_user_data(self, *, user_id: int) -> ExportedUser:
+        if self.export_user_data_use_case is None:
+            raise RuntimeError("Export use case is not wired in this container")
+        return await self.export_user_data_use_case.execute(user_id=user_id)
+
+    async def import_user_data(
+        self,
+        *,
+        user_id: int,
+        payload: dict[str, object] | str,
+    ) -> ImportResult:
+        if self.import_user_data_use_case is None:
+            raise RuntimeError("Import use case is not wired in this container")
+        return await self.import_user_data_use_case.execute(user_id=user_id, payload=payload)

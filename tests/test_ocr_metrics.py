@@ -10,9 +10,9 @@ from app.domain.errors import ValidationError
 
 
 def _upload() -> ImageUpload:
-    return ImageUpload(content=b"\x89PNG\x0d\x0a\x1a\x0a" + b"\x00" * 32,
-                       filename="test.png",
-                       content_type="image/png")
+    return ImageUpload(
+        content=b"\x89PNG\x0d\x0a\x1a\x0a" + b"\x00" * 32, filename="test.png", content_type="image/png"
+    )
 
 
 def _counter_probe() -> MagicMock:

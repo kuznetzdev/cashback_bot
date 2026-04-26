@@ -27,9 +27,9 @@ from app.application.use_cases.best_card_for_category import BestCardForCategory
 from app.application.use_cases.find_user_by_identity import FindUserByExternalIdentityUseCase
 from app.application.use_cases.get_ranking import GetRankingUseCase
 from app.application.use_cases.handle_command import HandleCommandUseCase
-from app.application.use_cases.ranking_snapshot import RankingSnapshotUseCase
 from app.application.use_cases.log_event import LogEventUseCase
 from app.application.use_cases.quick_add_bank import QuickAddBankUseCase
+from app.application.use_cases.ranking_snapshot import RankingSnapshotUseCase
 from app.application.use_cases.save_bank_draft import SaveBankDraftUseCase
 from app.application.use_cases.send_monthly_reminders import SendMonthlyRemindersUseCase
 from app.application.use_cases.sync_user import SyncTelegramUserUseCase
@@ -75,7 +75,9 @@ def _build_facade(uow_factory, dummy_ocr) -> ApplicationFacade:
     )
 
 
-def _build_client(uow_factory, dummy_ocr, tmp_path: Path, *, telegram_auth_enabled: bool = True) -> TestClient:
+def _build_client(
+    uow_factory, dummy_ocr, tmp_path: Path, *, telegram_auth_enabled: bool = True
+) -> TestClient:
     locales_dir = Path(__file__).resolve().parents[1] / "app" / "locales"
     deps = WebDependencies(
         facade=_build_facade(uow_factory, dummy_ocr),
@@ -122,10 +124,10 @@ def test_web_local_register_and_manual_flow(uow_factory, dummy_ocr, tmp_path: Pa
     assert "viewport-fit=cover" in home.text
 
     client.post("/app/action", data={"command": "open_add_bank", "payload_json": "{}"})
-    client.post("/app/action", data={"command": "select_bank_preset", "payload_json": "{\"index\": 0}"})
+    client.post("/app/action", data={"command": "select_bank_preset", "payload_json": '{"index": 0}'})
     manual_prompt = client.post(
         "/app/action",
-        data={"command": "choose_input_method", "payload_json": "{\"method\": \"manual\"}"},
+        data={"command": "choose_input_method", "payload_json": '{"method": "manual"}'},
     )
     assert manual_prompt.status_code == 200
     assert "<textarea" in manual_prompt.text
@@ -145,8 +147,8 @@ def test_web_photo_flow_uses_bytes_upload_contract(uow_factory, dummy_ocr, tmp_p
     _register(client)
 
     client.post("/app/action", data={"command": "open_add_bank", "payload_json": "{}"})
-    client.post("/app/action", data={"command": "select_bank_preset", "payload_json": "{\"index\": 0}"})
-    client.post("/app/action", data={"command": "choose_input_method", "payload_json": "{\"method\": \"photo\"}"})
+    client.post("/app/action", data={"command": "select_bank_preset", "payload_json": '{"index": 0}'})
+    client.post("/app/action", data={"command": "choose_input_method", "payload_json": '{"method": "photo"}'})
 
     buffer = io.BytesIO()
     Image.new("RGB", (60, 30), color="white").save(buffer, format="PNG")
@@ -170,7 +172,9 @@ def test_web_photo_flow_uses_bytes_upload_contract(uow_factory, dummy_ocr, tmp_p
     assert "распознать текст" in response.text or "read any categories" in response.text
 
 
-def test_web_telegram_callback_resolves_linked_identity(uow_factory, dummy_ocr, tmp_path: Path, store) -> None:
+def test_web_telegram_callback_resolves_linked_identity(
+    uow_factory, dummy_ocr, tmp_path: Path, store
+) -> None:
     client = _build_client(uow_factory, dummy_ocr, tmp_path)
 
     async def _seed() -> None:
@@ -229,7 +233,9 @@ def test_web_telegram_callback_rejects_unlinked_identity(uow_factory, dummy_ocr,
     assert "не привязан" in response.text or "not linked" in response.text
 
 
-def test_authenticated_user_can_link_and_unlink_telegram(uow_factory, dummy_ocr, tmp_path: Path, store) -> None:
+def test_authenticated_user_can_link_and_unlink_telegram(
+    uow_factory, dummy_ocr, tmp_path: Path, store
+) -> None:
     client = _build_client(uow_factory, dummy_ocr, tmp_path)
     _register(client, username="link_user")
 
@@ -249,7 +255,10 @@ def test_authenticated_user_can_link_and_unlink_telegram(uow_factory, dummy_ocr,
     )
 
     assert callback.status_code == 303
-    assert any(identity.provider == "telegram" and identity.provider_user_id == "999" for identity in store.identities.values())
+    assert any(
+        identity.provider == "telegram" and identity.provider_user_id == "999"
+        for identity in store.identities.values()
+    )
 
     unlink = client.post("/auth/telegram/unlink", follow_redirects=False)
     assert unlink.status_code == 303
@@ -263,18 +272,16 @@ def test_api_best_returns_401_for_anonymous(uow_factory, dummy_ocr, tmp_path: Pa
     assert response.json() == {"error": "unauthenticated"}
 
 
-def test_api_best_returns_snapshot_for_authenticated_user(
-    uow_factory, dummy_ocr, tmp_path: Path
-) -> None:
+def test_api_best_returns_snapshot_for_authenticated_user(uow_factory, dummy_ocr, tmp_path: Path) -> None:
     client = _build_client(uow_factory, dummy_ocr, tmp_path)
     _register(client, username="api_user")
 
     # Add a bank with one category so the snapshot has data to return.
     client.post("/app/action", data={"command": "open_add_bank", "payload_json": "{}"})
-    client.post("/app/action", data={"command": "select_bank_preset", "payload_json": "{\"index\": 0}"})
+    client.post("/app/action", data={"command": "select_bank_preset", "payload_json": '{"index": 0}'})
     client.post(
         "/app/action",
-        data={"command": "choose_input_method", "payload_json": "{\"method\": \"manual\"}"},
+        data={"command": "choose_input_method", "payload_json": '{"method": "manual"}'},
     )
     client.post("/app/input", data={"text": "АЗС 5%"})
     client.post("/app/action", data={"command": "save_bank", "payload_json": "{}"})
@@ -290,17 +297,15 @@ def test_api_best_returns_snapshot_for_authenticated_user(
     assert len(body["leaders"]) >= 1
 
 
-def test_api_best_empty_query_returns_leaders_without_match(
-    uow_factory, dummy_ocr, tmp_path: Path
-) -> None:
+def test_api_best_empty_query_returns_leaders_without_match(uow_factory, dummy_ocr, tmp_path: Path) -> None:
     client = _build_client(uow_factory, dummy_ocr, tmp_path)
     _register(client, username="api_user2")
 
     client.post("/app/action", data={"command": "open_add_bank", "payload_json": "{}"})
-    client.post("/app/action", data={"command": "select_bank_preset", "payload_json": "{\"index\": 0}"})
+    client.post("/app/action", data={"command": "select_bank_preset", "payload_json": '{"index": 0}'})
     client.post(
         "/app/action",
-        data={"command": "choose_input_method", "payload_json": "{\"method\": \"manual\"}"},
+        data={"command": "choose_input_method", "payload_json": '{"method": "manual"}'},
     )
     client.post("/app/input", data={"text": "Рестораны 7%"})
     client.post("/app/action", data={"command": "save_bank", "payload_json": "{}"})

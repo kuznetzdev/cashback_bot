@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 class DomainError(Exception):
     def __init__(self, message_key: str, payload: dict[str, object] | None = None) -> None:
         super().__init__(message_key)

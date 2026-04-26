@@ -11,12 +11,12 @@ from app.domain.services.categories import CategoryService
 from app.domain.services.parsing import ParserService
 
 
-@pytest.fixture()
+@pytest.fixture
 def categories():
     return CategoryService()
 
 
-@pytest.fixture()
+@pytest.fixture
 def use_case(uow_factory, categories):
     parser = ParserService(categories)
     return QuickAddBankUseCase(
@@ -27,7 +27,7 @@ def use_case(uow_factory, categories):
     )
 
 
-@pytest.fixture()
+@pytest.fixture
 async def user(store):
     from app.domain.models import UserAccount
 
@@ -114,13 +114,7 @@ async def test_quick_add_bank_updates_existing_bank(store, use_case, user):
 
 @pytest.mark.asyncio
 async def test_quick_add_bank_handles_multi_bank_batch(store, use_case, user):
-    payload = (
-        "Тинькофф:\n"
-        "АЗС 5%, Рестораны 3%\n"
-        "\n"
-        "Сбер:\n"
-        "Супермаркеты 10%, Аптеки 7%"
-    )
+    payload = "Тинькофф:\nАЗС 5%, Рестораны 3%\n\nСбер:\nСупермаркеты 10%, Аптеки 7%"
     result = await use_case.execute(user_id=user.id, payload=payload)
 
     assert result.batch is not None
@@ -146,9 +140,7 @@ async def test_quick_add_bank_reports_updated_on_existing_bank(store, use_case, 
 
 
 @pytest.mark.asyncio
-async def test_quick_add_bank_warns_on_unknown_category_with_suggestion(
-    store, use_case, user
-):
+async def test_quick_add_bank_warns_on_unknown_category_with_suggestion(store, use_case, user):
     # "Грумминговая" is deliberately far enough from any category slug that
     # the parser's own 80%-cutoff fuzzy match doesn't claim it, but close
     # enough to "groceries"/"гадж..." that our 60%-cutoff suggestion does.
@@ -159,15 +151,11 @@ async def test_quick_add_bank_warns_on_unknown_category_with_suggestion(
 
 
 @pytest.mark.asyncio
-async def test_quick_add_bank_suggests_close_match_for_unknown_input(
-    store, use_case, user
-):
+async def test_quick_add_bank_suggests_close_match_for_unknown_input(store, use_case, user):
     # A truly unknown made-up category: the normalizer returns a raw slug
     # (not in the known set), and the 60%-cutoff suggestion may or may not
     # fire, but the "Не распознано" warning must still surface.
-    result = await use_case.execute(
-        user_id=user.id, payload="Тинькофф: АБРАКАДАБРА 5%"
-    )
+    result = await use_case.execute(user_id=user.id, payload="Тинькофф: АБРАКАДАБРА 5%")
     assert result.batch is not None
     joined = "\n".join(result.batch.warnings)
     assert "АБРАКАДАБРА" in joined

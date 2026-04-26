@@ -13,13 +13,14 @@ our scale and the specific use case (an OpenAI 429 storm shouldn't burn
 your bill while waiting out the rate window), an in-process breaker is
 sufficient and stays out of the request critical path.
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Generic, TypeVar
 
 logger = logging.getLogger(__name__)
@@ -35,7 +36,8 @@ class CircuitOpenError(RuntimeError):
 @dataclass
 class CircuitBreakerStats:
     """Diagnostics — exposed to tests and ops dashboards."""
-    state: str = "closed"               # "closed" | "open" | "half_open"
+
+    state: str = "closed"  # "closed" | "open" | "half_open"
     consecutive_failures: int = 0
     opened_at: float | None = None
     last_failure_reason: str | None = None
@@ -91,8 +93,7 @@ class CircuitBreaker(Generic[T]):
             self._maybe_close_after_cool_down()
             if self._stats.state == "open":
                 raise CircuitOpenError(
-                    f"{self._name} circuit is open until "
-                    f"{self._stats.opened_at + self._cool_down:.1f}"
+                    f"{self._name} circuit is open until {self._stats.opened_at + self._cool_down:.1f}"
                 )
 
         try:

@@ -60,7 +60,7 @@ class WorkflowState:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, object]) -> "WorkflowState":
+    def from_dict(cls, data: dict[str, object]) -> WorkflowState:
         from decimal import Decimal
 
         raw_items = data.get("draft_items", [])

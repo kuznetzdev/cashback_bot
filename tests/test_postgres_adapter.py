@@ -154,7 +154,9 @@ async def test_postgres_uow_isolates_data_between_users() -> None:
         assert banks_b[0].bank_name == "Shared Name"
         items_a = await uow.cashback.list_for_bank(banks_a[0].id)
         items_b = await uow.cashback.list_for_bank(banks_b[0].id)
-        assert len(items_a) == 1 and items_a[0].normalized_category == "fuel"
-        assert len(items_b) == 1 and items_b[0].normalized_category == "restaurants"
+        assert len(items_a) == 1
+        assert items_a[0].normalized_category == "fuel"
+        assert len(items_b) == 1
+        assert items_b[0].normalized_category == "restaurants"
 
     await engine.dispose()

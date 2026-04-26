@@ -62,9 +62,7 @@ async def test_save_bank_accepts_exactly_100_percent(store, uow_factory) -> None
         user = await uow.users.create(display_name="U", default_language="ru")
         await uow.commit()
     items = _items(n=1, percent=Decimal("100"))
-    bank_id = await use_case.execute(
-        user_id=user.id, bank_id=None, bank_name="Tinkoff", items=items
-    )
+    bank_id = await use_case.execute(user_id=user.id, bank_id=None, bank_name="Tinkoff", items=items)
     assert bank_id in store.banks
 
 
@@ -74,9 +72,7 @@ async def test_save_bank_strips_whitespace_from_bank_name(store, uow_factory) ->
     async with uow_factory() as uow:
         user = await uow.users.create(display_name="U", default_language="ru")
         await uow.commit()
-    bank_id = await use_case.execute(
-        user_id=user.id, bank_id=None, bank_name="  Tinkoff  ", items=_items()
-    )
+    bank_id = await use_case.execute(user_id=user.id, bank_id=None, bank_name="  Tinkoff  ", items=_items())
     assert store.banks[bank_id].bank_name == "Tinkoff"
 
 
@@ -87,7 +83,5 @@ async def test_save_bank_accepts_max_length_name(store, uow_factory) -> None:
         user = await uow.users.create(display_name="U", default_language="ru")
         await uow.commit()
     name = "x" * _MAX_BANK_NAME_LENGTH
-    bank_id = await use_case.execute(
-        user_id=user.id, bank_id=None, bank_name=name, items=_items()
-    )
+    bank_id = await use_case.execute(user_id=user.id, bank_id=None, bank_name=name, items=_items())
     assert bank_id in store.banks

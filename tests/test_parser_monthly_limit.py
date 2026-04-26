@@ -8,7 +8,7 @@ from app.domain.services.categories import CategoryService
 from app.domain.services.parsing import ParserService
 
 
-@pytest.fixture()
+@pytest.fixture
 def parser() -> ParserService:
     return ParserService(CategoryService())
 

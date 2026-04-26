@@ -14,7 +14,15 @@ from app.adapters.postgres.models import (
     UserModel,
     utcnow,
 )
-from app.domain.models import Bank, CashbackDraftItem, LocalCredentials, ReminderTarget, UserAccount, UserIdentity, UserLogEntry
+from app.domain.models import (
+    Bank,
+    CashbackDraftItem,
+    LocalCredentials,
+    ReminderTarget,
+    UserAccount,
+    UserIdentity,
+    UserLogEntry,
+)
 from app.domain.services.ranking import RankingEntry
 
 
@@ -280,13 +288,17 @@ class PostgresBankRepository:
         return [self._to_domain(item) for item in result.scalars().all()]
 
     async def get_for_user(self, user_id: int, bank_id: int) -> Bank | None:
-        result = await self.session.execute(select(BankModel).where(BankModel.user_id == user_id, BankModel.id == bank_id))
+        result = await self.session.execute(
+            select(BankModel).where(BankModel.user_id == user_id, BankModel.id == bank_id)
+        )
         model = result.scalar_one_or_none()
         return self._to_domain(model) if model else None
 
     async def get_by_name(self, user_id: int, bank_name: str) -> Bank | None:
         result = await self.session.execute(
-            select(BankModel).where(BankModel.user_id == user_id, func.lower(BankModel.bank_name) == bank_name.strip().lower())
+            select(BankModel).where(
+                BankModel.user_id == user_id, func.lower(BankModel.bank_name) == bank_name.strip().lower()
+            )
         )
         model = result.scalar_one_or_none()
         return self._to_domain(model) if model else None
@@ -399,7 +411,11 @@ class PostgresLogRepository:
     async def list_action_since(self, user_id: int, action: str, since: datetime) -> list[UserLogEntry]:
         result = await self.session.execute(
             select(UserLogModel)
-            .where(UserLogModel.user_id == user_id, UserLogModel.action == action, UserLogModel.created_at >= since)
+            .where(
+                UserLogModel.user_id == user_id,
+                UserLogModel.action == action,
+                UserLogModel.created_at >= since,
+            )
             .order_by(desc(UserLogModel.created_at))
         )
         return [self._to_domain(item) for item in result.scalars().all()]

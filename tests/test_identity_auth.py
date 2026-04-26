@@ -3,7 +3,11 @@ from __future__ import annotations
 import pytest
 
 from app.adapters.auth_local import Argon2PasswordHasher
-from app.application.auth.models import ExternalIdentityContext, LocalAuthenticationCommand, LocalRegistrationCommand
+from app.application.auth.models import (
+    ExternalIdentityContext,
+    LocalAuthenticationCommand,
+    LocalRegistrationCommand,
+)
 from app.application.auth.use_cases import (
     AuthenticateExternalIdentityUseCase,
     AuthenticateLocalUserUseCase,
@@ -28,7 +32,9 @@ async def test_register_and_login_local_user(uow_factory) -> None:
             email="demo@example.com",
         )
     )
-    authenticated = await login.execute(LocalAuthenticationCommand(username="demo_user", password="strongpass123"))
+    authenticated = await login.execute(
+        LocalAuthenticationCommand(username="demo_user", password="strongpass123")
+    )
 
     assert authenticated.id == user.id
     assert authenticated.display_name == "Demo User"
@@ -65,7 +71,9 @@ async def test_external_identity_link_conflict_is_rejected(uow_factory) -> None:
 
     user_a = await register.execute(LocalRegistrationCommand(username="user_a", password="strongpass123"))
     user_b = await register.execute(LocalRegistrationCommand(username="user_b", password="strongpass123"))
-    identity = ExternalIdentityContext(provider="telegram", provider_user_id="42", provider_username="tg_user")
+    identity = ExternalIdentityContext(
+        provider="telegram", provider_user_id="42", provider_username="tg_user"
+    )
     await link.execute(user_id=user_a.id, identity=identity)
 
     with pytest.raises(ValidationError) as error:

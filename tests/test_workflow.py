@@ -37,10 +37,14 @@ async def test_manual_add_flow_and_save(uow_factory, dummy_ocr, store) -> None:
     result = await handle.execute(user, WorkflowState(), UserCommand(name="open_add_bank"))
     assert result.screen.id == "choose_bank"
 
-    result = await handle.execute(user, result.state, UserCommand(name="select_bank_preset", payload={"index": 0}))
+    result = await handle.execute(
+        user, result.state, UserCommand(name="select_bank_preset", payload={"index": 0})
+    )
     assert result.screen.id == "input_method"
 
-    result = await handle.execute(user, result.state, UserCommand(name="choose_input_method", payload={"method": "manual"}))
+    result = await handle.execute(
+        user, result.state, UserCommand(name="choose_input_method", payload={"method": "manual"})
+    )
     assert result.state.pending_input_kind == "manual_lines"
 
     result = await handle.execute(
@@ -72,8 +76,12 @@ async def test_edit_saved_bank_replaces_item_set_atomically(uow_factory, dummy_o
     result = await handle.execute(user, result.state, UserCommand(name="edit_bank", payload={"id": bank_id}))
     result = await handle.execute(user, result.state, UserCommand(name="delete_item", payload={"index": 0}))
     result = await handle.execute(user, result.state, UserCommand(name="add_item"))
-    result = await handle.execute(user, result.state, UserCommand(name="submit_item_category", payload={"text": "Pharmacy"}))
-    result = await handle.execute(user, result.state, UserCommand(name="submit_item_percent", payload={"text": "3"}))
+    result = await handle.execute(
+        user, result.state, UserCommand(name="submit_item_category", payload={"text": "Pharmacy"})
+    )
+    result = await handle.execute(
+        user, result.state, UserCommand(name="submit_item_percent", payload={"text": "3"})
+    )
     result = await handle.execute(user, result.state, UserCommand(name="save_bank"))
 
     saved_items = store.bank_items[bank_id]
@@ -81,17 +89,29 @@ async def test_edit_saved_bank_replaces_item_set_atomically(uow_factory, dummy_o
     assert saved_items[0].normalized_category == "pharmacy"
 
 
-async def test_draft_editing_actions_are_logged_and_save_returns_status_effect(uow_factory, dummy_ocr, store) -> None:
+async def test_draft_editing_actions_are_logged_and_save_returns_status_effect(
+    uow_factory, dummy_ocr, store
+) -> None:
     sync, handle = await _build_use_cases(uow_factory, dummy_ocr)
     user = await _create_user(sync)
 
     result = await handle.execute(user, WorkflowState(), UserCommand(name="open_add_bank"))
-    result = await handle.execute(user, result.state, UserCommand(name="select_bank_preset", payload={"index": 0}))
-    result = await handle.execute(user, result.state, UserCommand(name="choose_input_method", payload={"method": "manual"}))
-    result = await handle.execute(user, result.state, UserCommand(name="submit_manual_text", payload={"text": "Fuel 5%"}))
+    result = await handle.execute(
+        user, result.state, UserCommand(name="select_bank_preset", payload={"index": 0})
+    )
+    result = await handle.execute(
+        user, result.state, UserCommand(name="choose_input_method", payload={"method": "manual"})
+    )
+    result = await handle.execute(
+        user, result.state, UserCommand(name="submit_manual_text", payload={"text": "Fuel 5%"})
+    )
     result = await handle.execute(user, result.state, UserCommand(name="add_item"))
-    result = await handle.execute(user, result.state, UserCommand(name="submit_item_category", payload={"text": "Pharmacy"}))
-    result = await handle.execute(user, result.state, UserCommand(name="submit_item_percent", payload={"text": "3"}))
+    result = await handle.execute(
+        user, result.state, UserCommand(name="submit_item_category", payload={"text": "Pharmacy"})
+    )
+    result = await handle.execute(
+        user, result.state, UserCommand(name="submit_item_percent", payload={"text": "3"})
+    )
     result = await handle.execute(user, result.state, UserCommand(name="delete_item", payload={"index": 0}))
     result = await handle.execute(user, result.state, UserCommand(name="save_bank"))
 
@@ -101,7 +121,10 @@ async def test_draft_editing_actions_are_logged_and_save_returns_status_effect(u
     assert "draft_item_category_set" in actions
     assert "draft_item_added" in actions
     assert "draft_item_deleted" in actions
-    assert any(effect.kind == "show_status" and effect.payload.get("message_key") == "messages.saved_bank" for effect in result.effects)
+    assert any(
+        effect.kind == "show_status" and effect.payload.get("message_key") == "messages.saved_bank"
+        for effect in result.effects
+    )
 
 
 async def test_unknown_free_text_falls_back_to_help_screen(uow_factory, dummy_ocr) -> None:
@@ -114,7 +137,10 @@ async def test_unknown_free_text_falls_back_to_help_screen(uow_factory, dummy_oc
         UserCommand(name="submit_text", payload={"text": "abracadabra"}),
     )
     assert result.screen.id == "help"
-    assert any(effect.kind == "show_status" and effect.payload.get("message_key") == "errors.unknown_command" for effect in result.effects)
+    assert any(
+        effect.kind == "show_status" and effect.payload.get("message_key") == "errors.unknown_command"
+        for effect in result.effects
+    )
 
 
 async def test_interrupt_navigation_requires_explicit_decision(uow_factory, dummy_ocr) -> None:
@@ -122,9 +148,15 @@ async def test_interrupt_navigation_requires_explicit_decision(uow_factory, dumm
     user = await _create_user(sync)
 
     result = await handle.execute(user, WorkflowState(), UserCommand(name="open_add_bank"))
-    result = await handle.execute(user, result.state, UserCommand(name="select_bank_preset", payload={"index": 0}))
-    result = await handle.execute(user, result.state, UserCommand(name="choose_input_method", payload={"method": "manual"}))
-    result = await handle.execute(user, result.state, UserCommand(name="submit_manual_text", payload={"text": "Fuel 5%"}))
+    result = await handle.execute(
+        user, result.state, UserCommand(name="select_bank_preset", payload={"index": 0})
+    )
+    result = await handle.execute(
+        user, result.state, UserCommand(name="choose_input_method", payload={"method": "manual"})
+    )
+    result = await handle.execute(
+        user, result.state, UserCommand(name="submit_manual_text", payload={"text": "Fuel 5%"})
+    )
 
     interrupted = await handle.execute(user, result.state, UserCommand(name="open_top"))
     assert interrupted.screen.id == "interrupt_flow"
@@ -141,8 +173,12 @@ async def test_interrupt_navigation_from_pending_input_without_items(uow_factory
     user = await _create_user(sync)
 
     result = await handle.execute(user, WorkflowState(), UserCommand(name="open_add_bank"))
-    result = await handle.execute(user, result.state, UserCommand(name="select_bank_preset", payload={"index": 0}))
-    result = await handle.execute(user, result.state, UserCommand(name="choose_input_method", payload={"method": "manual"}))
+    result = await handle.execute(
+        user, result.state, UserCommand(name="select_bank_preset", payload={"index": 0})
+    )
+    result = await handle.execute(
+        user, result.state, UserCommand(name="choose_input_method", payload={"method": "manual"})
+    )
 
     interrupted = await handle.execute(user, result.state, UserCommand(name="open_home"))
     assert interrupted.screen.id == "interrupt_flow"
@@ -161,14 +197,23 @@ async def test_interrupt_discard_goes_to_target_and_clears_draft(uow_factory, du
     user = await _create_user(sync)
 
     result = await handle.execute(user, WorkflowState(), UserCommand(name="open_add_bank"))
-    result = await handle.execute(user, result.state, UserCommand(name="select_bank_preset", payload={"index": 0}))
-    result = await handle.execute(user, result.state, UserCommand(name="choose_input_method", payload={"method": "manual"}))
-    result = await handle.execute(user, result.state, UserCommand(name="submit_manual_text", payload={"text": "Fuel 5%"}))
+    result = await handle.execute(
+        user, result.state, UserCommand(name="select_bank_preset", payload={"index": 0})
+    )
+    result = await handle.execute(
+        user, result.state, UserCommand(name="choose_input_method", payload={"method": "manual"})
+    )
+    result = await handle.execute(
+        user, result.state, UserCommand(name="submit_manual_text", payload={"text": "Fuel 5%"})
+    )
     interrupted = await handle.execute(user, result.state, UserCommand(name="open_home"))
 
     discarded = await handle.execute(user, interrupted.state, UserCommand(name="discard_draft_and_go"))
     assert discarded.screen.id == "home"
-    assert any(effect.kind == "show_status" and effect.payload.get("message_key") == "messages.draft_discarded" for effect in discarded.effects)
+    assert any(
+        effect.kind == "show_status" and effect.payload.get("message_key") == "messages.draft_discarded"
+        for effect in discarded.effects
+    )
 
 
 async def test_interrupt_save_and_go_persists_bank(uow_factory, dummy_ocr, store) -> None:
@@ -176,9 +221,15 @@ async def test_interrupt_save_and_go_persists_bank(uow_factory, dummy_ocr, store
     user = await _create_user(sync)
 
     result = await handle.execute(user, WorkflowState(), UserCommand(name="open_add_bank"))
-    result = await handle.execute(user, result.state, UserCommand(name="select_bank_preset", payload={"index": 0}))
-    result = await handle.execute(user, result.state, UserCommand(name="choose_input_method", payload={"method": "manual"}))
-    result = await handle.execute(user, result.state, UserCommand(name="submit_manual_text", payload={"text": "Fuel 5%"}))
+    result = await handle.execute(
+        user, result.state, UserCommand(name="select_bank_preset", payload={"index": 0})
+    )
+    result = await handle.execute(
+        user, result.state, UserCommand(name="choose_input_method", payload={"method": "manual"})
+    )
+    result = await handle.execute(
+        user, result.state, UserCommand(name="submit_manual_text", payload={"text": "Fuel 5%"})
+    )
     interrupted = await handle.execute(user, result.state, UserCommand(name="open_my_banks"))
     saved = await handle.execute(user, interrupted.state, UserCommand(name="save_draft_and_go"))
 

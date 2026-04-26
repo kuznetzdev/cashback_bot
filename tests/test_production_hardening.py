@@ -1,6 +1,7 @@
 """Regression tests for the production-hardening pass: inline handler
 resilience, rate-limiter eviction, OCR temp-dir sweep, OpenAI client close,
 and config fail-fast validation."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -14,7 +15,6 @@ from app.adapters.telegram.rate_limit import TokenBucketRateLimiter
 from app.bootstrap.config import Settings
 from app.bootstrap.runtime import _validate_startup_settings
 from app.i18n.localizer import Localizer
-
 
 LOCALES_DIR = Path(__file__).resolve().parents[1] / "app" / "locales"
 

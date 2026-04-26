@@ -13,6 +13,7 @@ and each concern can be unit-tested in isolation:
   from the update and puts them in the handler ``data`` dict so downstream code
   doesn't need to re-derive them from different update types.
 """
+
 from __future__ import annotations
 
 import logging
@@ -132,9 +133,7 @@ class LoggingMiddleware(BaseMiddleware):
             if self._metrics is not None:
                 try:
                     self._metrics.requests_total.labels(handler=handler_name, status=status).inc()
-                    self._metrics.request_duration.labels(handler=handler_name).observe(
-                        elapsed_ms / 1000.0
-                    )
+                    self._metrics.request_duration.labels(handler=handler_name).observe(elapsed_ms / 1000.0)
                     if user_id is not None:
                         self._metrics.observe_user(user_id)
                 except Exception:  # pragma: no cover - metrics must never crash a handler

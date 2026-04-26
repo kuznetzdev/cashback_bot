@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 REQUIRED_ENV_KEYS = {
     "BOT_TOKEN",
     "TELEGRAM_BOT_USERNAME",

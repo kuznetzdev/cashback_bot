@@ -4,7 +4,6 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Any
 
 from rapidfuzz import process
 
@@ -28,7 +27,7 @@ class QuickAddResult:
     bank_id: int
     bank_name: str
     items: list[CashbackDraftItem]
-    batch: "QuickAddBatchResult | None" = None
+    batch: QuickAddBatchResult | None = None
 
 
 @dataclass(slots=True)
@@ -133,9 +132,7 @@ class QuickAddBankUseCase:
         first_result.batch = batch
         return first_result
 
-    def _parse_with_feedback(
-        self, normalized_text: str
-    ) -> tuple[list[CashbackDraftItem], list[str]]:
+    def _parse_with_feedback(self, normalized_text: str) -> tuple[list[CashbackDraftItem], list[str]]:
         """Parse manual lines and collect warnings for unknown categories and
         suspicious percentages. Items that *can* be parsed are still returned
         — we prefer degrading gracefully to bailing on a whole block."""
@@ -144,13 +141,11 @@ class QuickAddBankUseCase:
 
         known_slugs: set[str] = set()
         if self.categories is not None:
-            known_slugs = {slug for slug in self.categories._definitions.keys()}  # type: ignore[attr-defined]
+            known_slugs = {slug for slug in self.categories._definitions}  # type: ignore[attr-defined]
 
         for item in items:
             if item.percent > self._WARN_HIGH_PERCENT:
-                warnings.append(
-                    f"⚠️ Необычно высокий кешбэк {item.raw_category} {item.percent}% — проверь"
-                )
+                warnings.append(f"⚠️ Необычно высокий кешбэк {item.raw_category} {item.percent}% — проверь")
             # The normalizer returns the raw slug when it couldn't find a match
             # (title-cased bytes hashed into a slug). Flag those so the user
             # can confirm/correct the category name.
@@ -158,13 +153,10 @@ class QuickAddBankUseCase:
                 suggestion = self._suggest_category(item.raw_category)
                 if suggestion is not None:
                     warnings.append(
-                        f"⚠️ Не распознано: '{item.raw_category}' — "
-                        f"возможно имели в виду '{suggestion}'?"
+                        f"⚠️ Не распознано: '{item.raw_category}' — возможно имели в виду '{suggestion}'?"
                     )
                 else:
-                    warnings.append(
-                        f"⚠️ Не распознано: '{item.raw_category}'. Будет сохранено как есть."
-                    )
+                    warnings.append(f"⚠️ Не распознано: '{item.raw_category}'. Будет сохранено как есть.")
 
         return items, warnings
 

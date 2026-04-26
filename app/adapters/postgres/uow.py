@@ -4,7 +4,6 @@ from collections.abc import Callable
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.application.contracts.ports import UnitOfWorkPort
 from app.adapters.postgres.repositories import (
     PostgresBankRepository,
     PostgresCashbackRepository,
@@ -13,6 +12,7 @@ from app.adapters.postgres.repositories import (
     PostgresUserIdentityRepository,
     PostgresUserRepository,
 )
+from app.application.contracts.ports import UnitOfWorkPort
 
 
 class SqlAlchemyUnitOfWork(UnitOfWorkPort):
@@ -26,7 +26,7 @@ class SqlAlchemyUnitOfWork(UnitOfWorkPort):
         self.cashback: PostgresCashbackRepository
         self.logs: PostgresLogRepository
 
-    async def __aenter__(self) -> "SqlAlchemyUnitOfWork":
+    async def __aenter__(self) -> SqlAlchemyUnitOfWork:
         self.session = self._session_factory()
         self.users = PostgresUserRepository(self.session)
         self.identities = PostgresUserIdentityRepository(self.session)
@@ -52,7 +52,9 @@ class SqlAlchemyUnitOfWork(UnitOfWorkPort):
             await self.session.rollback()
 
 
-def build_uow_factory(session_factory: async_sessionmaker[AsyncSession]) -> Callable[[], SqlAlchemyUnitOfWork]:
+def build_uow_factory(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> Callable[[], SqlAlchemyUnitOfWork]:
     def factory() -> SqlAlchemyUnitOfWork:
         return SqlAlchemyUnitOfWork(session_factory)
 

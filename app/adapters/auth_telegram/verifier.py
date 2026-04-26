@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import time
-from typing import Mapping
+from collections.abc import Mapping
 
 from app.application.auth.models import ExternalIdentityContext
 from app.domain.errors import ValidationError

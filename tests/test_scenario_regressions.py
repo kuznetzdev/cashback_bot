@@ -9,6 +9,7 @@ Covers:
  - free-form text with no matching intent lands on /help, not a crash;
  - workflow state deserialisation survives junk input.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -27,7 +28,6 @@ from app.domain.errors import ValidationError
 from app.domain.services.categories import CategoryService
 from app.domain.services.parsing import ParserService
 from app.i18n.localizer import Localizer
-
 
 LOCALES_DIR = Path(__file__).resolve().parents[1] / "app" / "locales"
 
@@ -63,9 +63,7 @@ async def test_inline_empty_banks_without_bot_username_has_no_link_placeholder()
     from app.domain.models import UserAccount
 
     user = UserAccount(id=1, display_name="U", language="ru", notifications_enabled=True)
-    empty = RankingSnapshot(
-        leaders=[], query="", normalized_slug="", display_name="", best_match=None
-    )
+    empty = RankingSnapshot(leaders=[], query="", normalized_slug="", display_name="", best_match=None)
     facade = SimpleNamespace(
         find_user_by_external_identity=AsyncMock(return_value=user),
         ranking_snapshot=AsyncMock(return_value=empty),
@@ -77,7 +75,8 @@ async def test_inline_empty_banks_without_bot_username_has_no_link_placeholder()
 
     results = query.answer.await_args.kwargs["results"]
     body = results[0].input_message_content.message_text
-    assert "{link}" not in body and "{" not in body
+    assert "{link}" not in body
+    assert "{" not in body
 
 
 @pytest.mark.asyncio
@@ -114,13 +113,13 @@ def test_top_category_empty_includes_add_bank_cta() -> None:
 # --- /quickadd boundary percentages -----------------------------------------
 
 
-@pytest.fixture()
+@pytest.fixture
 def quick_add(uow_factory):
     parser = ParserService(CategoryService())
     return QuickAddBankUseCase(parser, SaveBankDraftUseCase(uow_factory))
 
 
-@pytest.fixture()
+@pytest.fixture
 async def user(store):
     from app.domain.models import UserAccount
 

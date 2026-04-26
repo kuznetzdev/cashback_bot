@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from app.application.contracts.ports import OCRPort, UnitOfWorkPort
 from app.application.use_cases.best_card_for_category import BestCardForCategoryUseCase
 from app.application.use_cases.change_language import ChangeLanguageUseCase
 from app.application.use_cases.delete_bank import DeleteBankUseCase
@@ -18,7 +19,6 @@ from app.application.use_cases.toggle_notifications import ToggleNotificationsUs
 from app.application.workflow.dependencies import WorkflowDependencies
 from app.application.workflow.dispatcher import WorkflowDispatcher
 from app.application.workflow.models import UserCommand, WorkflowResult, WorkflowState
-from app.application.contracts.ports import OCRPort, UnitOfWorkPort
 from app.domain.models import UserAccount
 from app.domain.services.categories import CategoryService
 from app.domain.services.parsing import ParserService

@@ -30,9 +30,7 @@ def test_auto_with_key_picks_composite_tesseract_first_openai_fallback() -> None
 
 
 def test_explicit_tesseract_ignores_key() -> None:
-    adapter = _build_ocr_adapter(
-        _settings(OCR_PROVIDER="tesseract", OPENAI_API_KEY="sk-test-123")
-    )
+    adapter = _build_ocr_adapter(_settings(OCR_PROVIDER="tesseract", OPENAI_API_KEY="sk-test-123"))
     assert isinstance(adapter, TesseractOCRAdapter)
 
 
@@ -71,4 +69,6 @@ def test_unknown_provider_raises_with_valid_options_in_message() -> None:
         _build_ocr_adapter(_settings(OCR_PROVIDER="invalid"))
     message = str(error.value)
     assert "invalid" in message
-    assert "tesseract" in message and "openai" in message and "auto" in message
+    assert "tesseract" in message
+    assert "openai" in message
+    assert "auto" in message

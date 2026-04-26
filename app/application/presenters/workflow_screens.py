@@ -6,7 +6,15 @@ from app.application.presenters.workflow_formatters import (
     format_ranking,
 )
 from app.application.workflow.models import Action, Effect, Screen, WorkflowResult, WorkflowState
-from app.domain.models import Bank, BankAggregate, BankScore, CashbackDraftItem, CategoryLeader, UserAccount, UserLogEntry
+from app.domain.models import (
+    Bank,
+    BankAggregate,
+    BankScore,
+    CashbackDraftItem,
+    CategoryLeader,
+    UserAccount,
+    UserLogEntry,
+)
 from app.domain.services.categories import CategoryService
 
 
@@ -46,10 +54,15 @@ def help_screen() -> Screen:
 
 
 def choose_bank_screen(popular_banks: list[str]) -> Screen:
-    actions = [Action(command="select_bank_preset", label_key=name, payload={"index": idx}) for idx, name in enumerate(popular_banks)]
+    actions = [
+        Action(command="select_bank_preset", label_key=name, payload={"index": idx})
+        for idx, name in enumerate(popular_banks)
+    ]
     actions.append(Action(command="select_bank_other", label_key="buttons.other_bank"))
     actions.append(Action(command="open_home", label_key="buttons.home"))
-    return Screen(id="choose_bank", title_key="screens.choose_bank", body_key="screens.choose_bank", actions=actions)
+    return Screen(
+        id="choose_bank", title_key="screens.choose_bank", body_key="screens.choose_bank", actions=actions
+    )
 
 
 def custom_bank_prompt_screen() -> Screen:
@@ -69,9 +82,17 @@ def input_method_screen(bank_name: str) -> Screen:
         body_key="screens.input_method",
         body_params={"bank_name": bank_name},
         actions=[
-            Action(command="choose_input_method", label_key="buttons.input_photo", payload={"method": "photo"}),
-            Action(command="choose_input_method", label_key="buttons.input_manual", payload={"method": "manual"}),
-            Action(command="choose_input_method", label_key="buttons.input_template", payload={"method": "template"}),
+            Action(
+                command="choose_input_method", label_key="buttons.input_photo", payload={"method": "photo"}
+            ),
+            Action(
+                command="choose_input_method", label_key="buttons.input_manual", payload={"method": "manual"}
+            ),
+            Action(
+                command="choose_input_method",
+                label_key="buttons.input_template",
+                payload={"method": "template"},
+            ),
             Action(command="cancel_flow", label_key="buttons.cancel"),
         ],
     )
@@ -99,7 +120,11 @@ def photo_prompt_screen() -> Screen:
 
 def preview_screen(state: WorkflowState, language: str, categories: CategoryService) -> Screen:
     actions = [
-        Action(command="pick_item", label_key=f"{idx + 1}. {item.raw_category} ({item.percent}%)", payload={"index": idx})
+        Action(
+            command="pick_item",
+            label_key=f"{idx + 1}. {item.raw_category} ({item.percent}%)",
+            payload={"index": idx},
+        )
         for idx, item in enumerate(state.draft_items)
     ]
     actions.extend(
@@ -132,7 +157,9 @@ def edit_item_screen(item: CashbackDraftItem, idx: int) -> Screen:
         actions=[
             Action(command="edit_item_category", label_key="buttons.edit_category", payload={"index": idx}),
             Action(command="edit_item_percent", label_key="buttons.edit_percent", payload={"index": idx}),
-            Action(command="delete_item", label_key="buttons.delete", payload={"index": idx}, destructive=True),
+            Action(
+                command="delete_item", label_key="buttons.delete", payload={"index": idx}, destructive=True
+            ),
             Action(command="open_preview", label_key="buttons.back"),
         ],
     )
@@ -161,7 +188,11 @@ def item_percent_prompt_screen() -> Screen:
 def settings_screen(user: UserAccount) -> Screen:
     notifications = "labels.notifications_on" if user.notifications_enabled else "labels.notifications_off"
     language = "labels.language_en" if user.language == "en" else "labels.language_ru"
-    toggle_key = "buttons.toggle_notifications_on" if user.notifications_enabled else "buttons.toggle_notifications_off"
+    toggle_key = (
+        "buttons.toggle_notifications_on"
+        if user.notifications_enabled
+        else "buttons.toggle_notifications_off"
+    )
     return Screen(
         id="settings",
         title_key="screens.settings",
@@ -177,9 +208,20 @@ def settings_screen(user: UserAccount) -> Screen:
 
 
 def interrupt_screen(*, target_label_key: str, can_save: bool) -> Screen:
-    actions = [Action(command="continue_draft", label_key="buttons.continue_editing", variant="secondary", group="safe")]
+    actions = [
+        Action(
+            command="continue_draft", label_key="buttons.continue_editing", variant="secondary", group="safe"
+        )
+    ]
     if can_save:
-        actions.append(Action(command="save_draft_and_go", label_key="buttons.save_and_continue", variant="primary", group="safe"))
+        actions.append(
+            Action(
+                command="save_draft_and_go",
+                label_key="buttons.save_and_continue",
+                variant="primary",
+                group="safe",
+            )
+        )
     actions.append(
         Action(
             command="discard_draft_and_go",
@@ -207,7 +249,10 @@ def my_banks_screen(banks: list[Bank]) -> Screen:
             body_key="messages.empty_banks",
             actions=[Action(command="open_home", label_key="buttons.home")],
         )
-    actions = [Action(command="open_bank", label_key=f"bank:{item.bank_name}", payload={"id": item.id}) for item in banks]
+    actions = [
+        Action(command="open_bank", label_key=f"bank:{item.bank_name}", payload={"id": item.id})
+        for item in banks
+    ]
     actions.append(Action(command="open_home", label_key="buttons.home"))
     return Screen(id="my_banks", title_key="screens.my_banks", body_key="screens.my_banks", actions=actions)
 
@@ -223,7 +268,12 @@ def bank_details_screen(aggregate: BankAggregate, language: str, categories: Cat
         },
         actions=[
             Action(command="edit_bank", label_key="buttons.edit", payload={"id": aggregate.bank.id}),
-            Action(command="request_delete_bank", label_key="buttons.delete", payload={"id": aggregate.bank.id}, destructive=True),
+            Action(
+                command="request_delete_bank",
+                label_key="buttons.delete",
+                payload={"id": aggregate.bank.id},
+                destructive=True,
+            ),
             Action(command="open_home", label_key="buttons.home"),
         ],
     )
@@ -236,7 +286,12 @@ def confirm_delete_bank_screen(aggregate: BankAggregate) -> Screen:
         body_key="screens.confirm_delete_bank",
         body_params={"bank_name": aggregate.bank.bank_name},
         actions=[
-            Action(command="confirm_delete_bank", label_key="buttons.confirm_delete", payload={"id": aggregate.bank.id}, destructive=True),
+            Action(
+                command="confirm_delete_bank",
+                label_key="buttons.confirm_delete",
+                payload={"id": aggregate.bank.id},
+                destructive=True,
+            ),
             Action(command="open_bank", label_key="buttons.back", payload={"id": aggregate.bank.id}),
         ],
     )
@@ -257,7 +312,12 @@ def top_screen(leaders: list[CategoryLeader], global_rating: list[BankScore]) ->
             ],
         )
     leaders_text, global_text = format_ranking(leaders, global_rating)
-    actions = [Action(command="open_top_category", label_key=item.category_name, payload={"slug": item.category_slug}) for item in leaders]
+    actions = [
+        Action(
+            command="open_top_category", label_key=item.category_name, payload={"slug": item.category_slug}
+        )
+        for item in leaders
+    ]
     actions.append(Action(command="open_home", label_key="buttons.home"))
     return Screen(
         id="top",
@@ -287,8 +347,15 @@ def top_category_screen(leader: CategoryLeader | None) -> Screen:
         id="top_category",
         title_key="screens.top_category",
         body_key="screens.top_category",
-        body_params={"category": leader.category_name, "percent": leader.best_percent, "banks": ", ".join(leader.bank_names)},
-        actions=[Action(command="open_top", label_key="buttons.back"), Action(command="open_home", label_key="buttons.home")],
+        body_params={
+            "category": leader.category_name,
+            "percent": leader.best_percent,
+            "banks": ", ".join(leader.bank_names),
+        },
+        actions=[
+            Action(command="open_top", label_key="buttons.back"),
+            Action(command="open_home", label_key="buttons.home"),
+        ],
     )
 
 

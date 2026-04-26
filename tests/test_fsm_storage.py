@@ -49,10 +49,15 @@ def test_build_fsm_storage_redis_with_url_uses_redis_storage() -> None:
     fake_cls.from_url.return_value = fake_storage
     with patch("aiogram.fsm.storage.redis.RedisStorage", fake_cls):
         storage = build_fsm_storage(settings)
-    assert storage is fake_storage
-    fake_cls.from_url.assert_called_once_with(
-        "redis://cache:6379/0", key_prefix="cashback_fsm:"
-    )
+    # Since v1.1 the Redis storage is wrapped in ResilientFSMStorage so a
+    # runtime Redis outage falls back to memory. Verify both: the Redis
+    # client was constructed with the right URL/prefix, and the wrapper
+    # holds the fake as its primary.
+    from app.adapters.telegram.resilient_storage import ResilientFSMStorage
+
+    assert isinstance(storage, ResilientFSMStorage)
+    assert storage._primary is fake_storage  # noqa: SLF001 - inspecting wiring
+    fake_cls.from_url.assert_called_once_with("redis://cache:6379/0", key_prefix="cashback_fsm:")
 
 
 def test_settings_rejects_unknown_fsm_storage_value() -> None:

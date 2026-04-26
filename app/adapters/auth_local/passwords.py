@@ -25,7 +25,7 @@ class Argon2PasswordHasher(PasswordHasherPort):
             return self._hasher.hash(password)
         salt = os.urandom(16)
         digest = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=2**14, r=8, p=1)
-        return "scrypt$16384$8$1$%s$%s" % (
+        return "scrypt$16384$8$1${}${}".format(
             base64.b64encode(salt).decode("ascii"),
             base64.b64encode(digest).decode("ascii"),
         )

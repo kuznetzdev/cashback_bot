@@ -9,7 +9,6 @@ from app.domain.enums import SourceType
 from app.domain.errors import ValidationError
 from app.domain.models import CashbackDraftItem, UserAccount
 
-
 DRAFT_COMMANDS = {
     "open_add_bank",
     "select_bank_preset",
@@ -57,7 +56,9 @@ async def handle_command(
         )
     if name == "select_bank_other":
         state.pending_input_kind = "custom_bank_name"
-        return workflow_screens.result_with_screen(user=user, state=state, screen=workflow_screens.custom_bank_prompt_screen())
+        return workflow_screens.result_with_screen(
+            user=user, state=state, screen=workflow_screens.custom_bank_prompt_screen()
+        )
     if name == "submit_custom_bank_name":
         bank_name = str(command.payload["text"]).strip()
         if not bank_name:
@@ -65,19 +66,25 @@ async def handle_command(
         state.selected_bank_name = bank_name
         state.selected_bank_id = None
         state.pending_input_kind = None
-        return workflow_screens.result_with_screen(user=user, state=state, screen=workflow_screens.input_method_screen(bank_name))
+        return workflow_screens.result_with_screen(
+            user=user, state=state, screen=workflow_screens.input_method_screen(bank_name)
+        )
     if name == "choose_input_method":
         method = str(command.payload["method"])
         if method == "manual":
             state.pending_input_kind = "manual_lines"
             state.temp_payload["source_type"] = SourceType.MANUAL.value
             await log_workflow_event(deps, user.id, "input_method_selected", {"method": "manual"})
-            return workflow_screens.result_with_screen(user=user, state=state, screen=workflow_screens.manual_prompt_screen())
+            return workflow_screens.result_with_screen(
+                user=user, state=state, screen=workflow_screens.manual_prompt_screen()
+            )
         if method == "photo":
             state.pending_input_kind = "photo_upload"
             state.temp_payload["source_type"] = SourceType.OCR.value
             await log_workflow_event(deps, user.id, "input_method_selected", {"method": "photo"})
-            return workflow_screens.result_with_screen(user=user, state=state, screen=workflow_screens.photo_prompt_screen())
+            return workflow_screens.result_with_screen(
+                user=user, state=state, screen=workflow_screens.photo_prompt_screen()
+            )
         if method == "template":
             state.pending_input_kind = None
             state.temp_payload["source_type"] = SourceType.TEMPLATE.value
@@ -90,7 +97,9 @@ async def handle_command(
                 )
                 for slug in deps.categories.template_slugs()
             ]
-            await log_workflow_event(deps, user.id, "draft_loaded_template", {"items_count": len(state.draft_items)})
+            await log_workflow_event(
+                deps, user.id, "draft_loaded_template", {"items_count": len(state.draft_items)}
+            )
             return workflow_screens.result_with_screen(
                 user=user,
                 state=state,
@@ -100,7 +109,9 @@ async def handle_command(
     if name == "submit_manual_text":
         state.draft_items = deps.parse_manual_use_case.execute(str(command.payload["text"]))
         state.pending_input_kind = None
-        await log_workflow_event(deps, user.id, "draft_loaded_manual", {"items_count": len(state.draft_items)})
+        await log_workflow_event(
+            deps, user.id, "draft_loaded_manual", {"items_count": len(state.draft_items)}
+        )
         return workflow_screens.result_with_screen(
             user=user,
             state=state,
@@ -126,8 +137,12 @@ async def handle_command(
         )
     if name == "add_item":
         state.pending_input_kind = "item_category_new"
-        await log_workflow_event(deps, user.id, "draft_item_add_started", {"items_count": len(state.draft_items)})
-        return workflow_screens.result_with_screen(user=user, state=state, screen=workflow_screens.item_category_prompt_screen())
+        await log_workflow_event(
+            deps, user.id, "draft_item_add_started", {"items_count": len(state.draft_items)}
+        )
+        return workflow_screens.result_with_screen(
+            user=user, state=state, screen=workflow_screens.item_category_prompt_screen()
+        )
     if name == "pick_item":
         idx = int(command.payload["index"])
         if idx < 0 or idx >= len(state.draft_items):
@@ -141,19 +156,32 @@ async def handle_command(
     if name == "edit_item_category":
         state.pending_input_kind = "item_category_edit"
         state.editing_item_index = int(command.payload["index"])
-        await log_workflow_event(deps, user.id, "draft_item_edit_category_started", {"index": state.editing_item_index})
-        return workflow_screens.result_with_screen(user=user, state=state, screen=workflow_screens.item_category_prompt_screen())
+        await log_workflow_event(
+            deps, user.id, "draft_item_edit_category_started", {"index": state.editing_item_index}
+        )
+        return workflow_screens.result_with_screen(
+            user=user, state=state, screen=workflow_screens.item_category_prompt_screen()
+        )
     if name == "edit_item_percent":
         state.pending_input_kind = "item_percent_edit"
         state.editing_item_index = int(command.payload["index"])
-        await log_workflow_event(deps, user.id, "draft_item_edit_percent_started", {"index": state.editing_item_index})
-        return workflow_screens.result_with_screen(user=user, state=state, screen=workflow_screens.item_percent_prompt_screen())
+        await log_workflow_event(
+            deps, user.id, "draft_item_edit_percent_started", {"index": state.editing_item_index}
+        )
+        return workflow_screens.result_with_screen(
+            user=user, state=state, screen=workflow_screens.item_percent_prompt_screen()
+        )
     if name == "delete_item":
         idx = int(command.payload["index"])
         if idx < 0 or idx >= len(state.draft_items):
             raise ValidationError("errors.invalid_manual_input")
         state.draft_items.pop(idx)
-        await log_workflow_event(deps, user.id, "draft_item_deleted", {"index": idx, "remaining_items_count": len(state.draft_items)})
+        await log_workflow_event(
+            deps,
+            user.id,
+            "draft_item_deleted",
+            {"index": idx, "remaining_items_count": len(state.draft_items)},
+        )
         return workflow_screens.result_with_screen(
             user=user,
             state=state,
@@ -220,7 +248,9 @@ async def _submit_item_category(
         {"mode": "new_pending", "normalized_category": normalized.slug},
     )
     state.pending_input_kind = "item_percent_new"
-    return workflow_screens.result_with_screen(user=user, state=state, screen=workflow_screens.item_percent_prompt_screen())
+    return workflow_screens.result_with_screen(
+        user=user, state=state, screen=workflow_screens.item_percent_prompt_screen()
+    )
 
 
 async def _submit_item_percent(
@@ -241,7 +271,9 @@ async def _submit_item_percent(
             percent=percent,
             source_type=old.source_type,
         )
-        await log_workflow_event(deps, user.id, "draft_item_percent_set", {"mode": "edit", "index": idx, "percent": str(percent)})
+        await log_workflow_event(
+            deps, user.id, "draft_item_percent_set", {"mode": "edit", "index": idx, "percent": str(percent)}
+        )
     else:
         category = state.temp_payload.get("pending_category")
         slug = state.temp_payload.get("pending_slug")
@@ -256,7 +288,9 @@ async def _submit_item_percent(
                 source_type=str(source_type),
             )
         )
-        await log_workflow_event(deps, user.id, "draft_item_added", {"normalized_category": str(slug), "percent": str(percent)})
+        await log_workflow_event(
+            deps, user.id, "draft_item_added", {"normalized_category": str(slug), "percent": str(percent)}
+        )
         state.temp_payload.pop("pending_category", None)
         state.temp_payload.pop("pending_slug", None)
     state.pending_input_kind = None

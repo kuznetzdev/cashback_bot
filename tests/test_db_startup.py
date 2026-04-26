@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from app.bootstrap.config import Settings
 from app.bootstrap import db_startup
+from app.bootstrap.config import Settings
 
 
 class FakeConnection:
@@ -69,7 +69,9 @@ async def test_ensure_database_exists_uses_database_url_for_postgres(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_ensure_database_exists_skips_non_postgres_database_url(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_ensure_database_exists_skips_non_postgres_database_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     settings = Settings(
         BOT_TOKEN="123456:ok",
         DATABASE_URL="sqlite+aiosqlite:///tmp/test.db",

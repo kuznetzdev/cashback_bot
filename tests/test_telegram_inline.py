@@ -12,7 +12,6 @@ from app.application.use_cases.ranking_snapshot import RankingSnapshot
 from app.domain.models import CategoryLeader, UserAccount
 from app.i18n.localizer import Localizer
 
-
 LOCALES_DIR = Path(__file__).resolve().parents[1] / "app" / "locales"
 
 
@@ -41,7 +40,7 @@ def _make_facade(*, find_user: UserAccount | None, snapshot: RankingSnapshot) ->
     )
 
 
-@pytest.fixture()
+@pytest.fixture
 def deps() -> InlineDependencies:
     return InlineDependencies(
         facade=SimpleNamespace(),

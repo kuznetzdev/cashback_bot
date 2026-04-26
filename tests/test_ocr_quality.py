@@ -8,6 +8,7 @@ Pins:
  - Parser rejects OCR-artifact categories (single char, digits-only,
    punctuation-only) so "5% 3% 7%" garbage doesn't polute a draft.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -23,7 +24,6 @@ from app.application.dto.media import ImageUpload
 from app.domain.errors import ValidationError
 from app.domain.services.categories import CategoryService
 from app.domain.services.parsing import ParserService
-
 
 # --- CompositeOCR content validator ------------------------------------------
 
@@ -90,9 +90,7 @@ async def test_composite_with_failing_validator_but_no_fallback_returns_primary(
     # can raise its own empty-offers error — we don't want to silently drop
     # the only result we have.
     primary = _StubOCR(text="garbage")
-    adapter = CompositeOCRAdapter(
-        primary=primary, fallback=None, content_validator=lambda text: False
-    )
+    adapter = CompositeOCRAdapter(primary=primary, fallback=None, content_validator=lambda text: False)
 
     assert await adapter.extract_text(_upload()) == "garbage"
 
@@ -150,11 +148,11 @@ def parser() -> ParserService:
 @pytest.mark.parametrize(
     "line",
     [
-        "% 5%",          # punctuation-only category
-        "1 2.5%",        # digit-only category
-        "- 3%",          # dash "category"
-        ". . 4%",        # dots
-        "5 7%",          # two numbers, no letters — classic OCR artifact
+        "% 5%",  # punctuation-only category
+        "1 2.5%",  # digit-only category
+        "- 3%",  # dash "category"
+        ". . 4%",  # dots
+        "5 7%",  # two numbers, no letters — classic OCR artifact
     ],
 )
 def test_parser_drops_ocr_artifact_categories(parser: ParserService, line: str) -> None:
@@ -207,8 +205,9 @@ def test_preprocess_produces_valid_png(tmp_path: Path) -> None:
 def test_preprocess_dark_image_gets_inverted_in_pipeline(tmp_path: Path) -> None:
     # Dark-dominant input (value=20) should come out light-dominant after the
     # auto-invert step runs during preprocessing.
-    from app.adapters.ocr_tesseract.service import TesseractOCRAdapter
     from PIL import ImageStat
+
+    from app.adapters.ocr_tesseract.service import TesseractOCRAdapter
 
     src = _solid_png(value=20)
     target = tmp_path / "out.png"

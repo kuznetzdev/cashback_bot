@@ -7,6 +7,7 @@ screenshots to the product should add entries here — the parser/category
 service is allowed to evolve, but these mappings must stay stable so downstream
 ranking keeps grouping correctly.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -15,7 +16,6 @@ import pytest
 
 from app.domain.services.categories import CategoryService
 from app.domain.services.parsing import ParserService
-
 
 # (raw_category_text, expected_slug) — sourced from 11 real/representative
 # screenshots: T-Bank April, T-Bank "В Городе", SberPrime, Yandex Plus, MTS,
@@ -85,7 +85,7 @@ def categories() -> CategoryService:
     return CategoryService()
 
 
-@pytest.mark.parametrize("raw,expected_slug", SCREENSHOT_CATEGORY_CASES)
+@pytest.mark.parametrize(("raw", "expected_slug"), SCREENSHOT_CATEGORY_CASES)
 def test_category_normalization_matches_screenshot(
     categories: CategoryService, raw: str, expected_slug: str
 ) -> None:
@@ -94,10 +94,8 @@ def test_category_normalization_matches_screenshot(
     )
 
 
-@pytest.mark.parametrize("raw,expected_slug", SCREENSHOT_CATEGORY_CASES)
-def test_parser_consumes_screenshot_lines(
-    categories: CategoryService, raw: str, expected_slug: str
-) -> None:
+@pytest.mark.parametrize(("raw", "expected_slug"), SCREENSHOT_CATEGORY_CASES)
+def test_parser_consumes_screenshot_lines(categories: CategoryService, raw: str, expected_slug: str) -> None:
     parser = ParserService(categories)
     # The OCR adapter emits one "Category: N%" line per offer. Verify the parser
     # turns each real screenshot line into exactly one draft item with the
@@ -147,7 +145,7 @@ def test_parser_drops_section_headers_gracefully(categories: CategoryService) ->
 
 
 @pytest.mark.parametrize(
-    "query,expected_slug",
+    ("query", "expected_slug"),
     [
         ("бензин", "fuel"),
         ("где лучше азс", "fuel"),

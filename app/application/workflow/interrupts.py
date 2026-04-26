@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from app.application.workflow.models import UserCommand, WorkflowState
 
-
 INTERRUPTIBLE_COMMANDS = {
     "start",
     "open_home",

@@ -6,8 +6,8 @@ deep link and the ``/start`` router handler that *consumes* it — must agree
 on the exact payload string. Keeping the constants here prevents silent
 sync bugs when one side is renamed in isolation.
 """
-from __future__ import annotations
 
+from __future__ import annotations
 
 # Tapped a plain "Open the bot" onboarding result → land on /home screen.
 PAYLOAD_INLINE = "inline"

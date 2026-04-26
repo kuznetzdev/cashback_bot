@@ -12,6 +12,54 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install ruff
+        run: pip install "ruff>=0.5,<1.0"
+
+      # Lint scope: app/ and tests/. Configuration lives in ruff.toml so
+      # local runs and CI agree.
+      - name: Run ruff check
+        run: ruff check app tests
+
+      - name: Run ruff format check
+        run: ruff format --check app tests
+
+  security:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install pip-audit
+        run: pip install "pip-audit>=2.7,<3.0"
+
+      # --strict turns CVE findings into a non-zero exit. We allow CI to
+      # warn on high-severity vulnerabilities without blocking — until
+      # the project agrees on a policy, we don't want a one-off CVE in a
+      # transitive dep to lock everyone out of merging.
+      - name: Audit pinned dependencies
+        run: pip-audit --requirement requirements.txt --vulnerability-service osv
+        continue-on-error: true
+
   tests:
     name: Tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest

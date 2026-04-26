@@ -22,6 +22,8 @@
   },
   "messages": {
     "processing": "Processing...",
+    "export_caption": "📦 Your data export. Keep the file safe — you can send it back to the bot any time to restore.",
+    "import_summary": "📥 Import done. Banks: {banks}, categories: {items}. Skipped banks: {skipped_banks}, items: {skipped_items}.",
     "saved_bank": "Bank saved.",
     "deleted_bank": "Bank deleted.",
     "deleted_category": "Deleted categories: {count}. Affected banks: {banks}.",
@@ -132,7 +134,10 @@
     "rate_limited": "⏳ Please wait — too many requests in a short time.",
     "bank_name_too_long": "Bank name is too long (max {max_length} characters).",
     "too_many_items": "Too many categories ({max_items} max). Remove some and try again.",
-    "percent_out_of_range": "Percent must be between 0 and {max_percent}. Looks like a typo."
+    "percent_out_of_range": "Percent must be between 0 and {max_percent}. Looks like a typo.",
+    "import_invalid_json": "Could not parse JSON for import.",
+    "import_invalid_payload": "Import expects an object with a 'banks' array.",
+    "import_too_many_banks": "Too many banks ({max_banks} max)."
   },
   "commands": {
     "start": "Start the bot",
@@ -143,7 +148,8 @@
     "settings": "Settings",
     "help": "Help",
     "home": "Main menu",
-    "cancel": "Cancel the current flow"
+    "cancel": "Cancel the current flow",
+    "export": "Export your data to JSON"
   },
   "inline": {
     "open_bot": "Open the bot to configure your banks",

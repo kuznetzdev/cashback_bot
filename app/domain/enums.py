@@ -1,20 +1,20 @@
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 
-class Language(str, Enum):
+class Language(StrEnum):
     RU = "ru"
     EN = "en"
 
 
-class SourceType(str, Enum):
+class SourceType(StrEnum):
     OCR = "ocr"
     MANUAL = "manual"
     TEMPLATE = "template"
 
 
-class OCRProvider(str, Enum):
+class OCRProvider(StrEnum):
     AUTO = "auto"
     OPENAI = "openai"
     TESSERACT = "tesseract"

@@ -1,5 +1,6 @@
 """Correlation id plumbing shared by telegram middleware, web middleware and
 structlog so a single update / HTTP request can be traced end-to-end."""
+
 from __future__ import annotations
 
 from contextvars import ContextVar

@@ -63,9 +63,7 @@ class CompositeOCRAdapter(OCRPort):
                 # No escalation path — return what we got and let the caller
                 # decide. Parser will raise errors.ocr_empty downstream.
                 return primary_text
-            logger.info(
-                "Primary OCR text had no parseable cashback offers; escalating to fallback."
-            )
+            logger.info("Primary OCR text had no parseable cashback offers; escalating to fallback.")
             try:
                 return await self._escalate_to_fallback(upload)
             except ValidationError as fallback_error:

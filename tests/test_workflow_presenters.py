@@ -101,7 +101,11 @@ def test_formatters_render_stable_strings_and_target_labels() -> None:
             created_at=datetime(2026, 3, 11, 10, 15),
         )
     ]
-    leaders = [CategoryLeader(category_slug="fuel", category_name="Fuel", best_percent=Decimal("7"), bank_names=["T-Bank"])]
+    leaders = [
+        CategoryLeader(
+            category_slug="fuel", category_name="Fuel", best_percent=Decimal("7"), bank_names=["T-Bank"]
+        )
+    ]
     global_rating = [BankScore(bank_name="T-Bank", score=42)]
 
     assert format_items_lines(items, categories, "en") == "- Fuel / Fuel: 5%"

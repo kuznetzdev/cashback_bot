@@ -13,13 +13,17 @@ def test_understand_delete_command_ru_en() -> None:
     parser = ParserService(CategoryService())
     delete_bank = parser.understand_delete_command("удали банк Т-Банк")
     delete_category = parser.understand_delete_command("delete category fuel")
-    assert delete_bank is not None and delete_bank.kind == "bank"
-    assert delete_category is not None and delete_category.kind == "category"
+    assert delete_bank is not None
+    assert delete_bank.kind == "bank"
+    assert delete_category is not None
+    assert delete_category.kind == "category"
 
 
 def test_understand_best_query_ru_en() -> None:
     parser = ParserService(CategoryService())
     ru = parser.understand_best_query("где лучше рестораны")
     en = parser.understand_best_query("best cashback for fuel")
-    assert ru is not None and ru.normalized_category == "restaurants"
-    assert en is not None and en.normalized_category == "fuel"
+    assert ru is not None
+    assert ru.normalized_category == "restaurants"
+    assert en is not None
+    assert en.normalized_category == "fuel"

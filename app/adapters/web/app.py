@@ -391,9 +391,7 @@ def create_web_app(deps: WebDependencies) -> FastAPI:
         user = await _get_current_user(request, deps)
         if user is None:
             return JSONResponse(status_code=401, content={"error": "unauthenticated"})
-        snapshot = await deps.facade.ranking_snapshot(
-            user_id=user.id, query=q, language=user.language
-        )
+        snapshot = await deps.facade.ranking_snapshot(user_id=user.id, query=q, language=user.language)
         return JSONResponse(
             content={
                 "query": snapshot.query,
@@ -511,7 +509,9 @@ async def _apply_effects(deps: WebDependencies, user: UserAccount, effects: list
     return messages
 
 
-async def _log_domain_error(deps: WebDependencies, user_id: int, error: DomainError, command_name: str) -> None:
+async def _log_domain_error(
+    deps: WebDependencies, user_id: int, error: DomainError, command_name: str
+) -> None:
     try:
         await deps.facade.log_event(
             user_id=user_id,
@@ -576,7 +576,12 @@ def _to_action_view(deps: WebDependencies, action: Action, language: str) -> dic
         variant = "danger"
     elif variant == "secondary" and action.command in {"save_bank", "open_add_bank", "choose_input_method"}:
         variant = "primary"
-    elif variant == "secondary" and action.command in {"open_home", "open_preview", "cancel_flow", "open_top"}:
+    elif variant == "secondary" and action.command in {
+        "open_home",
+        "open_preview",
+        "cancel_flow",
+        "open_top",
+    }:
         variant = "ghost"
     return {
         "command": action.command,
@@ -589,7 +594,10 @@ def _to_action_view(deps: WebDependencies, action: Action, language: str) -> dic
 
 
 def _ensure_mobile_navigation(actions: list[dict[str, object]], deps: WebDependencies, language: str) -> None:
-    has_safe_action = any(str(action.get("command", "")).strip() in {"open_home", "open_preview", "cancel_flow"} for action in actions)
+    has_safe_action = any(
+        str(action.get("command", "")).strip() in {"open_home", "open_preview", "cancel_flow"}
+        for action in actions
+    )
     if not has_safe_action:
         actions.append(
             {
@@ -609,7 +617,9 @@ def _ensure_mobile_navigation(actions: list[dict[str, object]], deps: WebDepende
                 break
 
 
-def _build_input_panel(expects_input: str | None, deps: WebDependencies, language: str) -> dict[str, object] | None:
+def _build_input_panel(
+    expects_input: str | None, deps: WebDependencies, language: str
+) -> dict[str, object] | None:
     if expects_input is None:
         return None
     if expects_input == "photo_upload":
@@ -796,7 +806,9 @@ def _render_landing(
     }
     if error is not None:
         context["error_message"] = deps.localizer.t(error.message_key, language, error.payload)
-    return templates.TemplateResponse(request=request, name="landing.html", context=context, status_code=status_code)
+    return templates.TemplateResponse(
+        request=request, name="landing.html", context=context, status_code=status_code
+    )
 
 
 def _telegram_callback_url(deps: WebDependencies) -> str:
@@ -813,6 +825,7 @@ def _clean_optional(value: object) -> str | None:
 # --------------------------------------------------------------------------
 # Middleware / observability helpers
 # --------------------------------------------------------------------------
+
 
 class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Adds baseline security headers. These are cheap in response time and

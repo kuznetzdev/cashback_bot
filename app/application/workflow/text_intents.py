@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from app.application.presenters import workflow_screens
 from app.application.workflow import banks
-from app.application.workflow.models import Effect, UserCommand, WorkflowResult, WorkflowState
 from app.application.workflow.dependencies import WorkflowDependencies
+from app.application.workflow.models import Effect, UserCommand, WorkflowResult, WorkflowState
 from app.domain.models import UserAccount
 
 
@@ -34,7 +34,9 @@ async def route_text(
                 state=WorkflowState(),
                 screen=workflow_screens.home_screen(body_key="messages.deleted_bank"),
             )
-        deleted_count, touched_banks = await deps.delete_category_use_case.execute(user_id=user.id, query=delete_intent.target)
+        deleted_count, touched_banks = await deps.delete_category_use_case.execute(
+            user_id=user.id, query=delete_intent.target
+        )
         return workflow_screens.result_with_screen(
             user=user,
             state=state,

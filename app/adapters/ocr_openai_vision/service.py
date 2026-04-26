@@ -17,8 +17,7 @@ from openai import (
     RateLimitError,
 )
 from PIL import Image, UnidentifiedImageError
-from pydantic import BaseModel, Field
-from pydantic import ValidationError as PydanticValidationError
+from pydantic import BaseModel, Field, ValidationError as PydanticValidationError
 
 from app.adapters._shared import validate_image_upload
 from app.adapters.circuit_breaker import CircuitBreaker, CircuitOpenError

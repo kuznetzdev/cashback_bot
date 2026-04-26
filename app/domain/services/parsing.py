@@ -18,7 +18,9 @@ class ParserService:
         # "N% Category" — the layout every Russian bank app uses on its cashback page.
         re.compile(r"^[+\-]?(?P<percent>\d{1,3}(?:[.,]\d{1,2})?)\s*%\s+(?P<category>.+?)$", re.IGNORECASE),
         re.compile(r"^(?P<category>.+?)\s+(?P<percent>\d{1,3}(?:[.,]\d{1,2})?)\s*%?$", re.IGNORECASE),
-        re.compile(r"^(?P<percent>\d{1,3}(?:[.,]\d{1,2})?)\s*%?\s*(?:for|on)\s+(?P<category>.+?)$", re.IGNORECASE),
+        re.compile(
+            r"^(?P<percent>\d{1,3}(?:[.,]\d{1,2})?)\s*%?\s*(?:for|on)\s+(?P<category>.+?)$", re.IGNORECASE
+        ),
     ]
     # Optional trailing "до N", "до N ₽", "max N", "(до N)" etc. — captures
     # the monthly cashback cap when banks include it on the cashback line.
@@ -33,7 +35,9 @@ class ParserService:
         re.IGNORECASE,
     )
     DELETE_BANK = re.compile(r"^(?:удали|удалить|delete)\s+(?:банк|bank)\s+(.+)$", re.IGNORECASE)
-    DELETE_CATEGORY = re.compile(r"^(?:удали|удалить|delete)\s+(?:категорию|категория|category)\s+(.+)$", re.IGNORECASE)
+    DELETE_CATEGORY = re.compile(
+        r"^(?:удали|удалить|delete)\s+(?:категорию|категория|category)\s+(.+)$", re.IGNORECASE
+    )
     BEST_PATTERNS = [
         re.compile(r"^(?:best\s+cashback\s+for|where\s+is\s+better\s+for)\s+(.+)$", re.IGNORECASE),
         re.compile(r"^(?:лучший\s+кэшбэк\s+на|где\s+лучше|что\s+лучше\s+для)\s+(.+)$", re.IGNORECASE),
@@ -149,5 +153,7 @@ class ParserService:
         for pattern in self.BEST_PATTERNS:
             match = pattern.match(stripped)
             if match:
-                return BestQueryIntent(normalized_category=self.categories.normalize(match.group(1).strip()).slug)
+                return BestQueryIntent(
+                    normalized_category=self.categories.normalize(match.group(1).strip()).slug
+                )
         return None

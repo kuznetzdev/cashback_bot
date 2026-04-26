@@ -155,7 +155,5 @@ async def test_postgres_list_ranking_entries_returns_all_items_in_one_query() ->
         entries = await uow.cashback.list_ranking_entries_for_user(user.id)
 
     assert len(entries) == 3
-    assert select_count == 1, (
-        f"Expected a single SELECT for the bulk ranking lookup, got {select_count}."
-    )
+    assert select_count == 1, f"Expected a single SELECT for the bulk ranking lookup, got {select_count}."
     await engine.dispose()

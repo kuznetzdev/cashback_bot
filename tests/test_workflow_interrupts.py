@@ -12,7 +12,11 @@ def test_has_active_draft_and_can_save_draft_follow_state_contents() -> None:
     pending = WorkflowState(selected_bank_name="T-Bank", pending_input_kind="manual_lines")
     filled = WorkflowState(
         selected_bank_name="T-Bank",
-        draft_items=[CashbackDraftItem(raw_category="Fuel", normalized_category="fuel", percent=Decimal("5"), source_type="manual")],
+        draft_items=[
+            CashbackDraftItem(
+                raw_category="Fuel", normalized_category="fuel", percent=Decimal("5"), source_type="manual"
+            )
+        ],
     )
 
     assert interrupts.has_active_draft(empty) is False

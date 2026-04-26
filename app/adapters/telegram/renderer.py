@@ -26,7 +26,9 @@ class TelegramScreenRenderer:
     def __init__(self, localizer: Localizer) -> None:
         self.localizer = localizer
 
-    async def render(self, *, event: Message | CallbackQuery, state: FSMContext, screen: Screen, language: str) -> None:
+    async def render(
+        self, *, event: Message | CallbackQuery, state: FSMContext, screen: Screen, language: str
+    ) -> None:
         bot, chat_id = self._extract_destination(event)
         text = self._render_screen_text(screen, language)
         keyboard = self._build_keyboard(screen, language)
@@ -45,7 +47,9 @@ class TelegramScreenRenderer:
             await self._safe_answer_callback(event)
             await self._safe_delete_callback_source(event, keep_message_id=new_message_id)
 
-    async def notify_status(self, event: Message | CallbackQuery, text: str, *, delete_after: bool = False) -> Message:
+    async def notify_status(
+        self, event: Message | CallbackQuery, text: str, *, delete_after: bool = False
+    ) -> Message:
         bot, chat_id = self._extract_destination(event)
         status = await self._send_message(bot=bot, chat_id=chat_id, text=text)
         if delete_after:
@@ -67,13 +71,15 @@ class TelegramScreenRenderer:
         markup = self._build_actions_keyboard(actions, language or "ru") if actions else None
         await self._send_message(bot=bot, chat_id=chat_id, text=text, markup=markup)
 
-    def _build_actions_keyboard(
-        self, actions: list[Action], language: str
-    ) -> InlineKeyboardMarkup | None:
+    def _build_actions_keyboard(self, actions: list[Action], language: str) -> InlineKeyboardMarkup | None:
         if not actions:
             return None
         rows = [
-            [InlineKeyboardButton(text=self.localizer.t(action.label_key, language), callback_data=encode_action(action))]
+            [
+                InlineKeyboardButton(
+                    text=self.localizer.t(action.label_key, language), callback_data=encode_action(action)
+                )
+            ]
             for action in actions
         ]
         return InlineKeyboardMarkup(inline_keyboard=rows)

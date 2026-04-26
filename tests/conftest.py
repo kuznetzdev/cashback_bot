@@ -9,7 +9,15 @@ import pytest
 
 from app.application.contracts.ports import UnitOfWorkPort
 from app.application.dto.media import ImageUpload
-from app.domain.models import Bank, CashbackDraftItem, LocalCredentials, ReminderTarget, UserAccount, UserIdentity, UserLogEntry
+from app.domain.models import (
+    Bank,
+    CashbackDraftItem,
+    LocalCredentials,
+    ReminderTarget,
+    UserAccount,
+    UserIdentity,
+    UserLogEntry,
+)
 
 
 @dataclass(slots=True)
@@ -305,7 +313,7 @@ class InMemoryUnitOfWork(UnitOfWorkPort):
         self.cashback = InMemoryCashbackRepo(store)
         self.logs = InMemoryLogsRepo(store)
 
-    async def __aenter__(self) -> "InMemoryUnitOfWork":
+    async def __aenter__(self) -> InMemoryUnitOfWork:
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
@@ -318,12 +326,12 @@ class InMemoryUnitOfWork(UnitOfWorkPort):
         return None
 
 
-@pytest.fixture()
+@pytest.fixture
 def store() -> InMemoryStore:
     return InMemoryStore()
 
 
-@pytest.fixture()
+@pytest.fixture
 def uow_factory(store: InMemoryStore) -> Callable[[], InMemoryUnitOfWork]:
     def factory() -> InMemoryUnitOfWork:
         return InMemoryUnitOfWork(store)
@@ -340,6 +348,6 @@ class DummyOCR:
         return self.value
 
 
-@pytest.fixture()
+@pytest.fixture
 def dummy_ocr() -> DummyOCR:
     return DummyOCR()

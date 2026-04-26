@@ -11,7 +11,9 @@ from app.domain.models import UserAccount
 
 class SyncTelegramUserUseCase:
     def __init__(self, uow_factory: Callable[[], UnitOfWorkPort], default_language: str) -> None:
-        self.auth_use_case = AuthenticateExternalIdentityUseCase(uow_factory, default_language=default_language)
+        self.auth_use_case = AuthenticateExternalIdentityUseCase(
+            uow_factory, default_language=default_language
+        )
 
     async def execute(self, ctx: UserContext, *, log_action: str | None = None) -> UserAccount:
         identity = ExternalIdentityContext(

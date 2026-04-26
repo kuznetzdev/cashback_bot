@@ -6,6 +6,7 @@ adapters, scheduler) want to record counts, a shared module makes more
 sense: all counters/histograms live here and the web app just renders
 the same registry.
 """
+
 from __future__ import annotations
 
 import logging

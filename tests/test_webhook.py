@@ -10,7 +10,7 @@ from app.adapters.web.app import WebDependencies, create_web_app
 from app.i18n.localizer import Localizer
 
 
-@pytest.fixture()
+@pytest.fixture
 def localizer() -> Localizer:
     locales_dir = Path(__file__).resolve().parents[1] / "app" / "locales"
     return Localizer(locales_dir=locales_dir, default_language="ru")

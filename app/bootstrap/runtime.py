@@ -5,23 +5,23 @@ import logging
 import signal
 from pathlib import Path
 
-from alembic import command
-from alembic.config import Config
 from aiogram import Bot, Dispatcher
 from aiogram.exceptions import TelegramNetworkError, TelegramServerError, TelegramUnauthorizedError
 from aiogram.fsm.storage.base import BaseStorage
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.adapters.scheduler import ReminderLoop
+from app.adapters.system import NoopReminderSender
 from app.adapters.telegram.rate_limit import TokenBucketRateLimiter
 from app.adapters.telegram.reminder_sender import TelegramReminderSender
 from app.adapters.telegram.renderer import TelegramScreenRenderer
 from app.adapters.telegram.router import TelegramDependencies, build_router
-from app.adapters.system import NoopReminderSender
 from app.adapters.web.app import WebDependencies, create_web_app
 from app.adapters.web.server import run_web_server
 from app.application import ApplicationFacade
@@ -259,9 +259,7 @@ async def _run_telegram_adapter(
     localizer: Localizer,
     metrics: MetricsRegistry | None = None,
 ) -> None:
-    dp = _build_dispatcher(
-        settings=settings, facade=facade, localizer=localizer, metrics=metrics
-    )
+    dp = _build_dispatcher(settings=settings, facade=facade, localizer=localizer, metrics=metrics)
     reminder_loop = ReminderLoop(facade.send_monthly_reminders)
     reminder_loop.start()
     try:
@@ -296,9 +294,7 @@ async def _run_webhook_adapter(
     so the shared shutdown path can tear down the reminder loop and bot
     session cleanly. The FastAPI app is the one actually dispatching updates."""
     try:
-        await _publish_bot_command_menu(
-            bot=bot, localizer=localizer, default_language=settings.lang_default
-        )
+        await _publish_bot_command_menu(bot=bot, localizer=localizer, default_language=settings.lang_default)
         url = f"{settings.web_base_url.rstrip('/')}{settings.webhook_path}"
         await bot.set_webhook(
             url=url,
@@ -340,7 +336,9 @@ def _resolve_app_version() -> str:
 
         out = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
-            capture_output=True, text=True, timeout=2,
+            capture_output=True,
+            text=True,
+            timeout=2,
         )
         if out.returncode == 0:
             return out.stdout.strip() or "dev"
@@ -363,6 +361,7 @@ async def _publish_bot_command_menu(*, bot: Bot, localizer: Localizer, default_l
             BotCommand(command="home", description=localizer.t("commands.home", default_language)),
             BotCommand(command="cancel", description=localizer.t("commands.cancel", default_language)),
             BotCommand(command="settings", description=localizer.t("commands.settings", default_language)),
+            BotCommand(command="export", description=localizer.t("commands.export", default_language)),
             BotCommand(command="help", description=localizer.t("commands.help", default_language)),
         ]
         await bot.set_my_commands(commands)
@@ -428,21 +427,26 @@ def build_fsm_storage(settings: Settings) -> BaseStorage:
     every deploy / crash. If ``FSM_STORAGE=redis`` but ``REDIS_URL`` is unset
     we fall back to memory with a loud warning rather than crashing, so the bot
     still boots in a degraded but usable mode.
+
+    When Redis is selected we wrap it in :class:`ResilientFSMStorage` so a
+    runtime Redis outage falls back to in-memory state for the duration of
+    the outage instead of raising on every user interaction.
     """
     storage_kind = settings.fsm_storage
     if storage_kind == "redis":
         redis_url = (settings.redis_url or "").strip()
         if not redis_url:
-            logger.warning(
-                "FSM_STORAGE=redis but REDIS_URL is empty — falling back to MemoryStorage."
-            )
+            logger.warning("FSM_STORAGE=redis but REDIS_URL is empty — falling back to MemoryStorage.")
             return MemoryStorage()
         # Imported lazily so installations without the redis extra still run
         # with MemoryStorage.
         from aiogram.fsm.storage.redis import RedisStorage
 
-        storage = RedisStorage.from_url(redis_url, key_prefix="cashback_fsm:")
-        logger.info("FSM storage: redis (%s)", redis_url)
+        from app.adapters.telegram.resilient_storage import ResilientFSMStorage
+
+        primary = RedisStorage.from_url(redis_url, key_prefix="cashback_fsm:")
+        storage = ResilientFSMStorage(primary)
+        logger.info("FSM storage: redis (%s) with in-memory fallback", redis_url)
         return storage
     logger.info("FSM storage: memory")
     return MemoryStorage()
@@ -452,16 +456,23 @@ def _validate_startup_settings(settings: Settings) -> None:
     if not settings.app_enable_telegram and not settings.app_enable_web:
         raise RuntimeError("At least one adapter must be enabled (APP_ENABLE_TELEGRAM or APP_ENABLE_WEB).")
     token = settings.bot_token.strip()
-    telegram_token_required = settings.app_enable_telegram or (settings.app_enable_web and settings.web_enable_telegram_auth)
+    telegram_token_required = settings.app_enable_telegram or (
+        settings.app_enable_web and settings.web_enable_telegram_auth
+    )
     if telegram_token_required and (
         not token or token.endswith(":TEST_TOKEN") or "replace_me" in token.lower()
     ):
-        raise RuntimeError("BOT_TOKEN is not configured. Set a valid Telegram bot token in .env or environment.")
-    if settings.app_enable_web and settings.web_enable_telegram_auth and not settings.telegram_bot_username.strip():
+        raise RuntimeError(
+            "BOT_TOKEN is not configured. Set a valid Telegram bot token in .env or environment."
+        )
+    if (
+        settings.app_enable_web
+        and settings.web_enable_telegram_auth
+        and not settings.telegram_bot_username.strip()
+    ):
         raise RuntimeError("TELEGRAM_BOT_USERNAME is required when APP_ENABLE_WEB=true.")
     if settings.app_enable_web and (
-        settings.web_session_secret == "change-me-session-secret"
-        or settings.web_session_secret.strip() == ""
+        settings.web_session_secret == "change-me-session-secret" or settings.web_session_secret.strip() == ""
     ):
         raise RuntimeError("WEB_SESSION_SECRET must be set to a non-default secret when APP_ENABLE_WEB=true.")
     # Fail-fast on OCR misconfiguration so the bot doesn't start in a state

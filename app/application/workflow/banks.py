@@ -18,7 +18,9 @@ async def handle_command(
     name = command.name
     if name == "open_my_banks":
         banks = await deps.get_user_banks_use_case.execute(user_id=user.id)
-        return workflow_screens.result_with_screen(user=user, state=state, screen=workflow_screens.my_banks_screen(banks))
+        return workflow_screens.result_with_screen(
+            user=user, state=state, screen=workflow_screens.my_banks_screen(banks)
+        )
     if name == "open_bank":
         aggregate = await load_bank_aggregate(deps, user.id, int(command.payload["id"]))
         return workflow_screens.result_with_screen(
@@ -42,7 +44,9 @@ async def handle_command(
         )
     if name == "request_delete_bank":
         aggregate = await load_bank_aggregate(deps, user.id, int(command.payload["id"]))
-        return workflow_screens.result_with_screen(user=user, state=state, screen=workflow_screens.confirm_delete_bank_screen(aggregate))
+        return workflow_screens.result_with_screen(
+            user=user, state=state, screen=workflow_screens.confirm_delete_bank_screen(aggregate)
+        )
     if name == "confirm_delete_bank":
         await deps.delete_bank_use_case.execute(user_id=user.id, bank_id=int(command.payload["id"]))
         return workflow_screens.result_with_screen(

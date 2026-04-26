@@ -3,7 +3,6 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-
 FORBIDDEN_TOP_LEVEL = {"aiogram", "fastapi", "sqlalchemy"}
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -30,8 +29,12 @@ def test_domain_and_application_do_not_import_adapters_or_frameworks() -> None:
         for file_path in _iter_python_files(root):
             for imported in _iter_imports(file_path):
                 top_level = imported.split(".", maxsplit=1)[0]
-                assert top_level not in FORBIDDEN_TOP_LEVEL, f"{file_path} imports forbidden dependency: {imported}"
-                assert not imported.startswith("app.adapters"), f"{file_path} imports adapter dependency: {imported}"
+                assert top_level not in FORBIDDEN_TOP_LEVEL, (
+                    f"{file_path} imports forbidden dependency: {imported}"
+                )
+                assert not imported.startswith("app.adapters"), (
+                    f"{file_path} imports adapter dependency: {imported}"
+                )
 
 
 def test_web_adapter_does_not_import_telegram_adapter_modules() -> None:

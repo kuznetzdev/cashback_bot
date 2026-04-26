@@ -24,7 +24,6 @@ from app.adapters.ocr_openai_vision.service import (
 from app.application.dto.media import ImageUpload
 from app.domain.errors import ValidationError
 
-
 # Minimal valid 1x1 PNG so PIL can sniff the format when content-type is missing.
 _PNG_1x1 = (
     b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
@@ -58,13 +57,9 @@ def _install_fake_completion(
         captured["kwargs"] = kwargs
         if raises is not None:
             raise raises
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=content or ""))]
-        )
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content or ""))])
 
-    adapter._client = SimpleNamespace(
-        chat=SimpleNamespace(completions=SimpleNamespace(create=fake_create))
-    )
+    adapter._client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=fake_create)))
     return captured
 
 
@@ -77,11 +72,13 @@ async def test_extract_text_formats_offers_for_parser() -> None:
     adapter = _build_adapter()
     _install_fake_completion(
         adapter,
-        content=_json_content([
-            {"category": "АЗС", "percent": 5},
-            {"category": "Рестораны", "percent": 10},
-            {"category": "Аптеки", "percent": 3.5},
-        ]),
+        content=_json_content(
+            [
+                {"category": "АЗС", "percent": 5},
+                {"category": "Рестораны", "percent": 10},
+                {"category": "Аптеки", "percent": 3.5},
+            ]
+        ),
     )
 
     text = await adapter.extract_text(_upload())
@@ -123,11 +120,13 @@ async def test_extract_text_deduplicates_and_keeps_highest_percent() -> None:
     adapter = _build_adapter()
     _install_fake_completion(
         adapter,
-        content=_json_content([
-            {"category": "Супермаркеты", "percent": 2},
-            {"category": "супермаркеты", "percent": 7},
-            {"category": "АЗС", "percent": 5},
-        ]),
+        content=_json_content(
+            [
+                {"category": "Супермаркеты", "percent": 2},
+                {"category": "супермаркеты", "percent": 7},
+                {"category": "АЗС", "percent": 5},
+            ]
+        ),
     )
 
     text = await adapter.extract_text(_upload())
@@ -141,11 +140,13 @@ async def test_extract_text_filters_invalid_percents_and_blank_categories() -> N
     adapter = _build_adapter()
     _install_fake_completion(
         adapter,
-        content=_json_content([
-            {"category": "АЗС", "percent": 5},
-            {"category": "   ", "percent": 10},  # blank category
-            {"category": "Noise", "percent": 0},  # zero percent
-        ]),
+        content=_json_content(
+            [
+                {"category": "АЗС", "percent": 5},
+                {"category": "   ", "percent": 10},  # blank category
+                {"category": "Noise", "percent": 0},  # zero percent
+            ]
+        ),
     )
 
     text = await adapter.extract_text(_upload())
@@ -194,9 +195,7 @@ async def test_extract_text_handles_empty_choices() -> None:
     async def empty_choices(**_kwargs):
         return SimpleNamespace(choices=[])
 
-    adapter._client = SimpleNamespace(
-        chat=SimpleNamespace(completions=SimpleNamespace(create=empty_choices))
-    )
+    adapter._client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=empty_choices)))
 
     with pytest.raises(ValidationError) as error:
         await adapter.extract_text(_upload())
@@ -223,18 +222,14 @@ async def test_extract_text_rejects_too_large_upload() -> None:
 async def test_extract_text_rejects_broken_binary_without_declared_type() -> None:
     adapter = _build_adapter()
     with pytest.raises(ValidationError) as error:
-        await adapter.extract_text(
-            _upload(content=b"not-an-image", content_type="application/octet-stream")
-        )
+        await adapter.extract_text(_upload(content=b"not-an-image", content_type="application/octet-stream"))
     assert error.value.message_key == "errors.broken_image"
 
 
 @pytest.mark.asyncio
 async def test_extract_text_sends_image_data_url_and_json_mode() -> None:
     adapter = _build_adapter()
-    captured = _install_fake_completion(
-        adapter, content=_json_content([{"category": "АЗС", "percent": 5}])
-    )
+    captured = _install_fake_completion(adapter, content=_json_content([{"category": "АЗС", "percent": 5}]))
 
     await adapter.extract_text(_upload())
 
@@ -256,9 +251,7 @@ async def test_extract_text_sends_image_data_url_and_json_mode() -> None:
 @pytest.mark.asyncio
 async def test_extract_text_infers_media_type_from_png_bytes_when_content_type_missing() -> None:
     adapter = _build_adapter()
-    captured = _install_fake_completion(
-        adapter, content=_json_content([{"category": "АЗС", "percent": 5}])
-    )
+    captured = _install_fake_completion(adapter, content=_json_content([{"category": "АЗС", "percent": 5}]))
 
     await adapter.extract_text(_upload(content_type=""))
 
@@ -269,9 +262,7 @@ async def test_extract_text_infers_media_type_from_png_bytes_when_content_type_m
 @pytest.mark.asyncio
 async def test_extract_text_normalizes_jpg_alias_to_jpeg() -> None:
     adapter = _build_adapter()
-    captured = _install_fake_completion(
-        adapter, content=_json_content([{"category": "АЗС", "percent": 5}])
-    )
+    captured = _install_fake_completion(adapter, content=_json_content([{"category": "АЗС", "percent": 5}]))
 
     await adapter.extract_text(_upload(content_type="image/jpg"))
 
@@ -286,9 +277,7 @@ async def test_extract_text_maps_wait_for_timeout_to_validation_error() -> None:
     async def slow_create(**_kwargs):
         await asyncio.sleep(5)
 
-    adapter._client = SimpleNamespace(
-        chat=SimpleNamespace(completions=SimpleNamespace(create=slow_create))
-    )
+    adapter._client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=slow_create)))
 
     with pytest.raises(ValidationError) as error:
         await adapter.extract_text(_upload())
@@ -305,7 +294,7 @@ def _mock_http_response(status: int) -> httpx.Response:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "error_factory,expected_key",
+    ("error_factory", "expected_key"),
     [
         (lambda: APITimeoutError(_mock_http_request()), "errors.ocr_timeout"),
         (lambda: APIConnectionError(request=_mock_http_request()), "errors.ocr_timeout"),
@@ -364,9 +353,7 @@ async def test_extract_text_offloads_base64_to_executor_so_event_loop_stays_resp
         return original_prepare(upload)
 
     adapter._prepare_image = spy_prepare  # type: ignore[method-assign]
-    _install_fake_completion(
-        adapter, content=_json_content([{"category": "АЗС", "percent": 5}])
-    )
+    _install_fake_completion(adapter, content=_json_content([{"category": "АЗС", "percent": 5}]))
 
     await adapter.extract_text(_upload())
 

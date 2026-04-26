@@ -8,6 +8,7 @@ The counter call site tolerates both real Prometheus counters (with
 ``.labels(...).inc()``) and anything that quacks the same way, so tests
 can stub it with a ``MagicMock`` without importing prometheus_client.
 """
+
 from __future__ import annotations
 
 import logging

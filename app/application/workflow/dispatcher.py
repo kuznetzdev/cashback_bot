@@ -26,15 +26,27 @@ class WorkflowDispatcher:
                     workflow_screens.result_with_screen(
                         user=current_user,
                         state=current_state,
-                        screen=workflow_screens.preview_screen(current_state, current_user.language, self.deps.categories),
+                        screen=workflow_screens.preview_screen(
+                            current_state, current_user.language, self.deps.categories
+                        ),
                     ),
                     queued_effects,
                 )
 
             if current_command.name == "discard_draft_and_go":
                 target_command = interrupts.take_interrupt_target(current_state)
-                await log_workflow_event(self.deps, current_user.id, "draft_discarded_via_interrupt", {"target": target_command.name})
-                queued_effects.append(Effect(kind="show_status", payload={"message_key": "messages.draft_discarded", "transient": True}))
+                await log_workflow_event(
+                    self.deps,
+                    current_user.id,
+                    "draft_discarded_via_interrupt",
+                    {"target": target_command.name},
+                )
+                queued_effects.append(
+                    Effect(
+                        kind="show_status",
+                        payload={"message_key": "messages.draft_discarded", "transient": True},
+                    )
+                )
                 current_state = WorkflowState()
                 current_command = target_command
                 continue
@@ -44,21 +56,31 @@ class WorkflowDispatcher:
                     raise ValidationError("errors.no_items_to_save")
                 target_command = interrupts.take_interrupt_target(current_state)
                 await draft.save_bank(self.deps, current_user.id, current_state)
-                await log_workflow_event(self.deps, current_user.id, "draft_saved_via_interrupt", {"target": target_command.name})
-                queued_effects.append(Effect(kind="show_status", payload={"message_key": "messages.saved_bank", "transient": True}))
+                await log_workflow_event(
+                    self.deps, current_user.id, "draft_saved_via_interrupt", {"target": target_command.name}
+                )
+                queued_effects.append(
+                    Effect(
+                        kind="show_status", payload={"message_key": "messages.saved_bank", "transient": True}
+                    )
+                )
                 current_state = WorkflowState()
                 current_command = target_command
                 continue
 
             if interrupts.should_interrupt_navigation(current_state, current_command):
                 interrupts.set_interrupt_target(current_state, current_command)
-                await log_workflow_event(self.deps, current_user.id, "draft_interrupt_prompt", {"target": current_command.name})
+                await log_workflow_event(
+                    self.deps, current_user.id, "draft_interrupt_prompt", {"target": current_command.name}
+                )
                 return self._finalize(
                     workflow_screens.result_with_screen(
                         user=current_user,
                         state=current_state,
                         screen=workflow_screens.interrupt_screen(
-                            target_label_key=target_label(interrupts.peek_interrupt_target_name(current_state)),
+                            target_label_key=target_label(
+                                interrupts.peek_interrupt_target_name(current_state)
+                            ),
                             can_save=interrupts.can_save_draft(current_state),
                         ),
                     ),
@@ -66,7 +88,9 @@ class WorkflowDispatcher:
                 )
 
             if current_command.name == "submit_text":
-                routed = await text_intents.route_text(self.deps, current_user, current_state, str(current_command.payload["text"]))
+                routed = await text_intents.route_text(
+                    self.deps, current_user, current_state, str(current_command.payload["text"])
+                )
                 if isinstance(routed, UserCommand):
                     current_command = routed
                     continue
@@ -74,7 +98,11 @@ class WorkflowDispatcher:
 
             if current_command.name == "save_bank":
                 bank_id = await draft.save_bank(self.deps, current_user.id, current_state)
-                queued_effects.append(Effect(kind="show_status", payload={"message_key": "messages.saved_bank", "transient": True}))
+                queued_effects.append(
+                    Effect(
+                        kind="show_status", payload={"message_key": "messages.saved_bank", "transient": True}
+                    )
+                )
                 current_command = UserCommand(name="open_bank", payload={"id": bank_id})
                 continue
 
@@ -82,7 +110,9 @@ class WorkflowDispatcher:
             if result is None:
                 result = await banks.handle_command(self.deps, current_user, current_state, current_command)
             if result is None:
-                result = await navigation.handle_command(self.deps, current_user, current_state, current_command)
+                result = await navigation.handle_command(
+                    self.deps, current_user, current_state, current_command
+                )
             if result is None:
                 raise ValidationError("errors.unknown_command")
             return self._finalize(result, queued_effects)

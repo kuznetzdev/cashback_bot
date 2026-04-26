@@ -26,7 +26,7 @@ def _result(user: UserAccount, state: WorkflowState, screen_id: str) -> Workflow
     )
 
 
-@pytest.mark.asyncio()
+@pytest.mark.asyncio
 async def test_dispatcher_routes_command_family_to_banks_before_navigation(monkeypatch) -> None:
     calls: list[str] = []
     user = UserAccount(id=1, display_name="Demo", language="ru", notifications_enabled=True)
@@ -56,7 +56,7 @@ async def test_dispatcher_routes_command_family_to_banks_before_navigation(monke
     assert calls == ["draft", "banks"]
 
 
-@pytest.mark.asyncio()
+@pytest.mark.asyncio
 async def test_dispatcher_routes_to_navigation_when_other_handlers_skip(monkeypatch) -> None:
     calls: list[str] = []
     user = UserAccount(id=1, display_name="Demo", language="ru", notifications_enabled=True)
@@ -86,13 +86,17 @@ async def test_dispatcher_routes_to_navigation_when_other_handlers_skip(monkeypa
     assert calls == ["draft", "banks", "navigation"]
 
 
-@pytest.mark.asyncio()
+@pytest.mark.asyncio
 async def test_save_draft_and_go_processes_target_iteratively_without_recursive_reentry(monkeypatch) -> None:
     calls: list[str] = []
     user = UserAccount(id=1, display_name="Demo", language="ru", notifications_enabled=True)
     state = WorkflowState(
         selected_bank_name="T-Bank",
-        draft_items=[CashbackDraftItem(raw_category="Fuel", normalized_category="fuel", percent=Decimal("5"), source_type="manual")],
+        draft_items=[
+            CashbackDraftItem(
+                raw_category="Fuel", normalized_category="fuel", percent=Decimal("5"), source_type="manual"
+            )
+        ],
     )
     interrupts.set_interrupt_target(state, UserCommand(name="open_home"))
     deps = StubDependencies(categories=CategoryService())
@@ -127,4 +131,7 @@ async def test_save_draft_and_go_processes_target_iteratively_without_recursive_
 
     assert result.screen.id == "home"
     assert calls == ["save_bank", "log:draft_saved_via_interrupt", "draft", "banks", "navigation:open_home"]
-    assert any(effect.kind == "show_status" and effect.payload["message_key"] == "messages.saved_bank" for effect in result.effects)
+    assert any(
+        effect.kind == "show_status" and effect.payload["message_key"] == "messages.saved_bank"
+        for effect in result.effects
+    )

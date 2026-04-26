@@ -6,6 +6,7 @@ or IP that restarts the process gets a fresh allowance; that's acceptable for
 the abuse profile we're defending against (individual users hammering a single
 session).
 """
+
 from __future__ import annotations
 
 import time

@@ -1,3 +1,5 @@
+import pytest
+
 from app.adapters.telegram.callbacks import decode_callback, encode_action
 from app.application.models import Action
 from app.domain.errors import ValidationError
@@ -19,9 +21,15 @@ def test_decode_nav_top_category() -> None:
 
 
 def test_input_method_callbacks_match_contract() -> None:
-    manual_action = Action(command="choose_input_method", label_key="buttons.input_manual", payload={"method": "manual"})
-    photo_action = Action(command="choose_input_method", label_key="buttons.input_photo", payload={"method": "photo"})
-    template_action = Action(command="choose_input_method", label_key="buttons.input_template", payload={"method": "template"})
+    manual_action = Action(
+        command="choose_input_method", label_key="buttons.input_manual", payload={"method": "manual"}
+    )
+    photo_action = Action(
+        command="choose_input_method", label_key="buttons.input_photo", payload={"method": "photo"}
+    )
+    template_action = Action(
+        command="choose_input_method", label_key="buttons.input_template", payload={"method": "template"}
+    )
 
     assert encode_action(manual_action) == "nav:input_manual"
     assert encode_action(photo_action) == "nav:input_photo"
@@ -30,18 +38,18 @@ def test_input_method_callbacks_match_contract() -> None:
     decoded_manual = decode_callback("nav:input_manual")
     decoded_photo = decode_callback("nav:input_photo")
     decoded_template = decode_callback("nav:input_template")
-    assert decoded_manual.name == "choose_input_method" and decoded_manual.payload["method"] == "manual"
-    assert decoded_photo.name == "choose_input_method" and decoded_photo.payload["method"] == "photo"
-    assert decoded_template.name == "choose_input_method" and decoded_template.payload["method"] == "template"
+    assert decoded_manual.name == "choose_input_method"
+    assert decoded_manual.payload["method"] == "manual"
+    assert decoded_photo.name == "choose_input_method"
+    assert decoded_photo.payload["method"] == "photo"
+    assert decoded_template.name == "choose_input_method"
+    assert decoded_template.payload["method"] == "template"
 
 
 def test_decode_invalid_numeric_callback_raises_validation_error() -> None:
-    try:
+    with pytest.raises(ValidationError) as info:
         decode_callback("nav:bank:not-a-number")
-    except ValidationError as error:
-        assert error.message_key == "errors.unknown_command"
-        return
-    raise AssertionError("Expected ValidationError for malformed callback payload")
+    assert info.value.message_key == "errors.unknown_command"
 
 
 def test_all_core_screen_actions_have_callback_mapping() -> None:
@@ -52,7 +60,9 @@ def test_all_core_screen_actions_have_callback_mapping() -> None:
         Action(command="select_bank_other", label_key="buttons.other_bank"),
         Action(command="choose_input_method", label_key="buttons.input_photo", payload={"method": "photo"}),
         Action(command="choose_input_method", label_key="buttons.input_manual", payload={"method": "manual"}),
-        Action(command="choose_input_method", label_key="buttons.input_template", payload={"method": "template"}),
+        Action(
+            command="choose_input_method", label_key="buttons.input_template", payload={"method": "template"}
+        ),
         Action(command="open_preview", label_key="buttons.back"),
         Action(command="open_my_banks", label_key="buttons.my_banks"),
         Action(command="open_bank", label_key="bank:T-Bank", payload={"id": 1}),

@@ -4,6 +4,7 @@ pipeline, because the full pipeline requires the Tesseract binary and a
 large fixture corpus. The inversion heuristic is the part most likely to
 regress and the cheapest to cover.
 """
+
 from __future__ import annotations
 
 from PIL import Image
