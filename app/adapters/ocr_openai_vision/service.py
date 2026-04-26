@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 from pydantic import ValidationError as PydanticValidationError
 
 from app.adapters._shared import validate_image_upload
+from app.adapters.circuit_breaker import CircuitBreaker, CircuitOpenError
 from app.application.contracts.ports import OCRPort
 from app.application.dto.media import ImageUpload
 from app.domain.errors import ValidationError
@@ -151,6 +152,7 @@ class OpenAIVisionOCRAdapter(OCRPort):
         timeout: int = 60,
         max_file_size: int = 5 * 1024 * 1024,
         max_tokens: int = 1024,
+        breaker: CircuitBreaker | None = None,
     ) -> None:
         if not api_key:
             raise ValueError("OPENAI_API_KEY is required for OpenAIVisionOCRAdapter")
@@ -167,6 +169,16 @@ class OpenAIVisionOCRAdapter(OCRPort):
         self._timeout = timeout
         self._max_file_size = max_file_size
         self._max_tokens = max_tokens
+        # Trip after 5 consecutive errors and stay open for 60 s. Picked so a
+        # transient outage (rate-limit window, brief 5xx burst) costs at most
+        # ~5 calls before we stop hammering the upstream — the user's photo
+        # uploads still escalate to errors.ocr_unavailable but the OpenAI bill
+        # and the upstream rate quota are protected.
+        self._breaker = breaker or CircuitBreaker(
+            name="openai_vision",
+            failure_threshold=5,
+            cool_down_seconds=60.0,
+        )
 
     async def close(self) -> None:
         """Release the underlying httpx connection pool. Safe to call twice;
@@ -190,7 +202,16 @@ class OpenAIVisionOCRAdapter(OCRPort):
         data_url = f"data:{media_type};base64,{image_b64}"
 
         try:
-            raw_content = await asyncio.wait_for(self._call_model(data_url), timeout=self._timeout)
+            raw_content = await self._breaker.call(
+                lambda: asyncio.wait_for(self._call_model(data_url), timeout=self._timeout)
+            )
+        except CircuitOpenError as error:
+            # Upstream is in a known-bad state; don't waste a call on it.
+            # Map to the same key as a network error so the composite adapter
+            # treats it the same way — and keep the message in `extra` for
+            # ops to grep.
+            logger.warning("OpenAI vision skipped: %s", error)
+            raise ValidationError("errors.ocr_timeout") from error
         except TimeoutError as error:
             raise ValidationError("errors.ocr_timeout") from error
         except (APITimeoutError, APIConnectionError, RateLimitError) as error:

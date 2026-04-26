@@ -330,6 +330,7 @@ class PostgresCashbackRepository:
                 normalized_category=item.normalized_category,
                 percent=item.percent,
                 source_type=item.source_type,
+                monthly_limit=item.monthly_limit,
             )
             for item in result.scalars().all()
         ]
@@ -344,6 +345,7 @@ class PostgresCashbackRepository:
                     normalized_category=item.normalized_category,
                     percent=item.percent,
                     source_type=item.source_type,
+                    monthly_limit=item.monthly_limit,
                 )
             )
         await self.session.flush()

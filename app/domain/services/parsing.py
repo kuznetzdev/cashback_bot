@@ -20,6 +20,18 @@ class ParserService:
         re.compile(r"^(?P<category>.+?)\s+(?P<percent>\d{1,3}(?:[.,]\d{1,2})?)\s*%?$", re.IGNORECASE),
         re.compile(r"^(?P<percent>\d{1,3}(?:[.,]\d{1,2})?)\s*%?\s*(?:for|on)\s+(?P<category>.+?)$", re.IGNORECASE),
     ]
+    # Optional trailing "до N", "до N ₽", "max N", "(до N)" etc. — captures
+    # the monthly cashback cap when banks include it on the cashback line.
+    # Number formats supported: 3000, 3 000, 3000.50, 3000,50, 3к → 3000.
+    _LIMIT_RE = re.compile(
+        r"[\(\[]?\s*"
+        r"(?:до|max|maximum|лимит|cap|up\s+to)\s+"
+        r"(?P<amount>\d[\d\s]*(?:[.,]\d{1,2})?)\s*"
+        r"(?P<suffix>[kкKК])?"
+        r"\s*(?:₽|rub|руб(?:\.|лей|ля)?|rur)?"
+        r"\s*[\)\]]?\s*$",
+        re.IGNORECASE,
+    )
     DELETE_BANK = re.compile(r"^(?:удали|удалить|delete)\s+(?:банк|bank)\s+(.+)$", re.IGNORECASE)
     DELETE_CATEGORY = re.compile(r"^(?:удали|удалить|delete)\s+(?:категорию|категория|category)\s+(.+)$", re.IGNORECASE)
     BEST_PATTERNS = [
@@ -48,22 +60,27 @@ class ParserService:
             parsed = self._parse_line(line)
             if parsed is None:
                 continue
-            category_raw, percent = parsed
+            category_raw, percent, monthly_limit = parsed
             normalized = self.categories.normalize(category_raw)
             item = CashbackDraftItem(
                 raw_category=category_raw,
                 normalized_category=normalized.slug,
                 percent=percent,
                 source_type=source_type,
+                monthly_limit=monthly_limit,
             )
             current = best.get(item.normalized_category)
             if current is None or item.percent > current.percent:
                 best[item.normalized_category] = item
         return sorted(best.values(), key=lambda item: (-item.percent, item.raw_category.lower()))
 
-    def _parse_line(self, line: str) -> tuple[str, Decimal] | None:
+    def _parse_line(self, line: str) -> tuple[str, Decimal, Decimal | None] | None:
+        # Strip and capture an optional trailing "до N ₽" / "max N" suffix
+        # before the regex pattern runs — that keeps the percent-pattern
+        # logic identical and concentrates limit-extraction in one place.
+        residual_line, monthly_limit = self._extract_trailing_limit(line)
         for pattern in self.LINE_PATTERNS:
-            match = pattern.match(line)
+            match = pattern.match(residual_line)
             if not match:
                 continue
             category = match.group("category").strip(" :-")
@@ -82,8 +99,40 @@ class ParserService:
                 return None
             if not any(ch.isalpha() for ch in category):
                 return None
-            return category, percent.quantize(Decimal("0.01"))
+            return category, percent.quantize(Decimal("0.01")), monthly_limit
         return None
+
+    def _extract_trailing_limit(self, line: str) -> tuple[str, Decimal | None]:
+        """Strip and parse a trailing monthly-cap suffix.
+
+        Returns ``(line_without_suffix, limit_or_None)``. The suffix is
+        always stripped when matched — even if the value itself is
+        rejected (out of plausible range, malformed shorthand) — because
+        leaving the trailing "до 9999999999" tokens in the residual
+        almost guarantees the percent pattern will then fail. Better to
+        keep the offer with no limit than drop it entirely.
+        """
+        match = self._LIMIT_RE.search(line)
+        if not match:
+            return line, None
+        residual = line[: match.start()].rstrip(" ,;") or line
+        amount_text = match.group("amount").replace(" ", "").replace(",", ".")
+        suffix = (match.group("suffix") or "").lower()
+        try:
+            value = Decimal(amount_text)
+        except InvalidOperation:
+            return residual, None
+        # "3к" / "3K" → 3000. Common shorthand on Russian bank screenshots.
+        if suffix in ("k", "к"):
+            value *= Decimal("1000")
+        if value <= 0:
+            return residual, None
+        # Cap pathological inputs — a "limit" of ten million rubles is
+        # almost certainly an OCR misread of a balance counter, not a
+        # real per-month cap.
+        if value > Decimal("10000000"):
+            return residual, None
+        return residual, value.quantize(Decimal("0.01"))
 
     def understand_delete_command(self, text: str) -> DeleteIntent | None:
         stripped = text.strip()

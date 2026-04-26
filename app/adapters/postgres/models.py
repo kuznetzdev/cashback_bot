@@ -98,6 +98,11 @@ class CashbackItemModel(Base):
     normalized_category: Mapped[str] = mapped_column(Text, nullable=False)
     percent: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
     source_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    # Optional monthly cashback cap. Numeric(12, 2) covers any plausible
+    # ruble amount up to 9_999_999_999.99 — well over any real-world cap.
+    monthly_limit: Mapped[Decimal | None] = mapped_column(
+        Numeric(12, 2), nullable=True, default=None
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(), nullable=False, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(), nullable=False, default=utcnow, onupdate=utcnow)
 

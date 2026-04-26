@@ -50,6 +50,12 @@ class CashbackDraftItem:
     normalized_category: str
     percent: Decimal
     source_type: str
+    # Optional monthly cashback cap in user-currency units (rubles in Russian
+    # banks). Many real offers are gated like "АЗС 5% до 3000 ₽ в месяц"; we
+    # capture the number when present so the ranker can choose the card with
+    # the best *effective* rate for a given spend rather than the headline
+    # percent. None means uncapped (or unknown — we don't make assumptions).
+    monthly_limit: Decimal | None = None
 
 
 @dataclass(slots=True)

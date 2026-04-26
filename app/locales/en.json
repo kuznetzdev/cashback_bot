@@ -129,7 +129,10 @@
     "last_identity_unlink_forbidden": "Add local credentials before unlinking the last external identity.",
     "quickadd_usage": "Usage: /quickadd <bank>: <category> <percent>%, ...\nExample: /quickadd Tinkoff: Fuel 5%, Restaurants 3%",
     "photo_rate_limited": "Too many photos too quickly. Please wait a moment and try again.",
-    "rate_limited": "⏳ Please wait — too many requests in a short time."
+    "rate_limited": "⏳ Please wait — too many requests in a short time.",
+    "bank_name_too_long": "Bank name is too long (max {max_length} characters).",
+    "too_many_items": "Too many categories ({max_items} max). Remove some and try again.",
+    "percent_out_of_range": "Percent must be between 0 and {max_percent}. Looks like a typo."
   },
   "commands": {
     "start": "Start the bot",
