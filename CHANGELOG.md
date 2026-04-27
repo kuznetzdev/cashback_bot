@@ -4,6 +4,67 @@ All notable changes to this project are documented in this file. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] — 2026-04-25
+
+### Added
+
+* **Pre-month reminder.** A few days before the new calendar month
+  rolls over (default: 3 days, configurable via
+  `PRE_MONTH_REMINDER_WINDOW_DAYS`), users with at least one saved
+  bank receive a heads-up to refresh their cashback selection. The
+  reminder respects the existing `REMINDER_HOUR` and self-deduplicates
+  per upcoming-period key, so the daily scheduler tick can run safely.
+* **Stale-data reminder.** When a user's most recent bank/item
+  `updated_at` is older than `STALE_DATA_THRESHOLD_DAYS` (default 14),
+  the bot nudges them with a "your data may be misleading — refresh
+  to keep recommendations honest" message. One reminder per
+  (user, calendar month).
+* **`latest_updated_at_for_user`** added to `CashbackRepositoryPort`.
+  Postgres implementation does a single `MAX(...)` over banks + items;
+  in-memory test repo mirrors the semantics for unit tests.
+* **`ApplicationFacade.send_all_reminders()`** runs the monthly +
+  pre-month + stale-data use cases on each scheduler tick with
+  per-use-case isolation (a failure in one variant doesn't drop the
+  others on the same tick).
+* **Two new env knobs**: `PRE_MONTH_REMINDER_WINDOW_DAYS`,
+  `STALE_DATA_THRESHOLD_DAYS`. Both range-validated by Pydantic.
+* **New locale strings**: `messages.reminder_upcoming_month`,
+  `messages.reminder_stale_data` (RU + EN).
+
+### Changed
+
+* **`MetricsRegistry._seen_users` is now bounded LRU.** Capped at 50K
+  distinct users (configurable via `max_tracked_users`); oldest is
+  evicted when capacity is exceeded. The previous unbounded `set`
+  leaked ~30 MiB per million users until process restart.
+  `cashback_bot_active_users_total` now reports "distinct users in
+  the recent window" — the more honest metric anyway.
+* **Telegram photo handler** explicitly closes its `BytesIO` buffer
+  immediately after copying the image bytes into `ImageUpload`, and
+  drops the local handle to the bytes after passing to the OCR
+  pipeline. Same treatment for the `/import` document handler.
+  Reduces peak memory under burst load.
+* **`ReminderSenderPort` Protocol** grew two methods
+  (`send_upcoming_month_reminder`, `send_stale_data_reminder`).
+  `TelegramReminderSender` and `NoopReminderSender` both implement
+  them.
+* **Reminder loop** now drives `send_all_reminders` instead of the
+  monthly-only entry point.
+
+### Migration notes
+
+* No schema migration. Reminder dedup happens via existing
+  `user_logs` rows with new action types
+  (`pre_month_reminder_sent`, `stale_data_reminder_sent`).
+* No env-var rename — only additions. Defaults are sane for any
+  existing deployment.
+
+### Stats
+
+* Tests: 417 → 433 passing (16 new, 0 regressions).
+
+---
+
 ## [1.1.0] — 2026-04-25
 
 ### Added

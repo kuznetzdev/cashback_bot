@@ -72,6 +72,14 @@ class Settings(BaseSettings):
     metrics_token: str = Field(default="", alias="METRICS_TOKEN")
     api_rate_limit_per_minute: int = Field(default=60, alias="API_RATE_LIMIT_PER_MINUTE", ge=1, le=10000)
 
+    # Reminder cadence — how many days before the new month the pre-month
+    # nudge fires (3 by default — covers a weekend before the rollover),
+    # and how many days of inactivity flip the data into "stale" state.
+    pre_month_reminder_window_days: int = Field(
+        default=3, alias="PRE_MONTH_REMINDER_WINDOW_DAYS", ge=1, le=14
+    )
+    stale_data_threshold_days: int = Field(default=14, alias="STALE_DATA_THRESHOLD_DAYS", ge=1, le=90)
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _parse_cors_origins(cls, value: object) -> object:

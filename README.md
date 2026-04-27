@@ -13,8 +13,8 @@ cards. It does **not** track transactions, real accrued cashback, expenses,
 or budgeting — it is a **decision-support tool** that answers the one question
 that matters at the checkout: *"which card do I tap right now?"*
 
-[![tests](https://img.shields.io/badge/tests-417%20passing-brightgreen)](tests/)
-[![version](https://img.shields.io/badge/version-1.1.0-blue)](CHANGELOG.md)
+[![tests](https://img.shields.io/badge/tests-433%20passing-brightgreen)](tests/)
+[![version](https://img.shields.io/badge/version-1.2.0-blue)](CHANGELOG.md)
 [![python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
 [![docker](https://img.shields.io/badge/docker-compose--ready-blue)](docker-compose.yml)
 

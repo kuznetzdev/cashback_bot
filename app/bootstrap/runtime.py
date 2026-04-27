@@ -83,7 +83,7 @@ async def run_app() -> None:
                 localizer=localizer,
                 metrics=metrics,
             )
-            reminder_loop = ReminderLoop(telegram_facade.send_monthly_reminders)
+            reminder_loop = ReminderLoop(telegram_facade.send_all_reminders)
             reminder_loop.start()
             tasks.append(
                 asyncio.create_task(
@@ -260,7 +260,7 @@ async def _run_telegram_adapter(
     metrics: MetricsRegistry | None = None,
 ) -> None:
     dp = _build_dispatcher(settings=settings, facade=facade, localizer=localizer, metrics=metrics)
-    reminder_loop = ReminderLoop(facade.send_monthly_reminders)
+    reminder_loop = ReminderLoop(facade.send_all_reminders)
     reminder_loop.start()
     try:
         await _publish_bot_command_menu(bot=bot, localizer=localizer, default_language=settings.lang_default)

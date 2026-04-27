@@ -25,6 +25,8 @@ from app.application.use_cases.log_event import LogEventUseCase
 from app.application.use_cases.quick_add_bank import QuickAddBankUseCase, QuickAddResult
 from app.application.use_cases.ranking_snapshot import RankingSnapshot, RankingSnapshotUseCase
 from app.application.use_cases.send_monthly_reminders import SendMonthlyRemindersUseCase
+from app.application.use_cases.send_pre_month_reminders import SendPreMonthRemindersUseCase
+from app.application.use_cases.send_stale_data_reminders import SendStaleDataRemindersUseCase
 from app.application.use_cases.sync_user import SyncTelegramUserUseCase
 from app.application.workflow.models import UserCommand, WorkflowResult, WorkflowState
 from app.domain.models import CategoryLeader, UserAccount, UserIdentity
@@ -51,6 +53,8 @@ class ApplicationFacade:
         ranking_snapshot_use_case: RankingSnapshotUseCase,
         export_user_data_use_case: ExportUserDataUseCase | None = None,
         import_user_data_use_case: ImportUserDataUseCase | None = None,
+        pre_month_reminders_use_case: SendPreMonthRemindersUseCase | None = None,
+        stale_data_reminders_use_case: SendStaleDataRemindersUseCase | None = None,
     ) -> None:
         self.register_local_user_use_case = register_local_user_use_case
         self.authenticate_local_user_use_case = authenticate_local_user_use_case
@@ -70,6 +74,8 @@ class ApplicationFacade:
         self.ranking_snapshot_use_case = ranking_snapshot_use_case
         self.export_user_data_use_case = export_user_data_use_case
         self.import_user_data_use_case = import_user_data_use_case
+        self.pre_month_reminders_use_case = pre_month_reminders_use_case
+        self.stale_data_reminders_use_case = stale_data_reminders_use_case
 
     async def register_local_user(self, command: LocalRegistrationCommand) -> UserAccount:
         return await self.register_local_user_use_case.execute(command)
@@ -114,6 +120,40 @@ class ApplicationFacade:
 
     async def send_monthly_reminders(self) -> int:
         return await self.reminders_use_case.execute()
+
+    async def send_all_reminders(self) -> int:
+        """One-shot tick that runs every reminder use case the facade has
+        wired (monthly + upcoming-month + stale-data). Used by the
+        scheduler so the same hourly poll drives all three flavours;
+        each use case self-deduplicates so calling them every hour is
+        harmless. Returns the **total** number of messages sent across
+        all flavours."""
+        total = 0
+        try:
+            total += await self.reminders_use_case.execute()
+        except Exception:
+            # The reminder loop wraps this whole call in its own
+            # try/except, but we add per-use-case isolation here so a
+            # failure in the monthly path doesn't drop the others on the
+            # same tick.
+            import logging as _logging
+
+            _logging.getLogger(__name__).exception("Monthly reminder failed")
+        if self.pre_month_reminders_use_case is not None:
+            try:
+                total += await self.pre_month_reminders_use_case.execute()
+            except Exception:
+                import logging as _logging
+
+                _logging.getLogger(__name__).exception("Pre-month reminder failed")
+        if self.stale_data_reminders_use_case is not None:
+            try:
+                total += await self.stale_data_reminders_use_case.execute()
+            except Exception:
+                import logging as _logging
+
+                _logging.getLogger(__name__).exception("Stale-data reminder failed")
+        return total
 
     async def log_event(self, *, user_id: int, action: str, payload: dict[str, object] | None = None) -> None:
         await self.log_event_use_case.execute(user_id=user_id, action=action, payload=payload)

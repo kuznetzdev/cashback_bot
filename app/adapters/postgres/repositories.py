@@ -390,6 +390,28 @@ class PostgresCashbackRepository:
             for row in result.all()
         ]
 
+    async def latest_updated_at_for_user(self, user_id: int):
+        """Return the most recent updated_at timestamp across the user's
+        banks and items, or None if the user has no banks. Used by the
+        stale-data reminder use case."""
+        bank_max = await self.session.execute(
+            select(func.max(BankModel.updated_at)).where(BankModel.user_id == user_id)
+        )
+        item_max = await self.session.execute(
+            select(func.max(CashbackItemModel.updated_at))
+            .join(BankModel, BankModel.id == CashbackItemModel.bank_id)
+            .where(BankModel.user_id == user_id)
+        )
+        bank_value = bank_max.scalar_one_or_none()
+        item_value = item_max.scalar_one_or_none()
+        if bank_value is None and item_value is None:
+            return None
+        if bank_value is None:
+            return item_value
+        if item_value is None:
+            return bank_value
+        return bank_value if bank_value >= item_value else item_value
+
 
 class PostgresLogRepository:
     def __init__(self, session: AsyncSession) -> None:

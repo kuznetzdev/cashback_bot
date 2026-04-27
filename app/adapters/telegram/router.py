@@ -151,8 +151,16 @@ def build_router(deps: TelegramDependencies) -> Router:
                 message, deps.localizer.t("messages.processing", user.language)
             )
             photo = message.photo[-1]
+            # Download into a BytesIO that we explicitly close after the
+            # bytes have been copied into ImageUpload. Without close() the
+            # internal buffer stays referenced until GC — fine in steady
+            # state but adds avoidable peaks under burst load.
             buffer = io.BytesIO()
-            await message.bot.download(photo, destination=buffer)
+            try:
+                await message.bot.download(photo, destination=buffer)
+                content_bytes = buffer.getvalue()
+            finally:
+                buffer.close()
             # Keep the "typing..." indicator alive while OCR + downstream work
             # run — it naturally expires after ~5s, so we repeat until the
             # coroutine finishes. The status sticker above is visible content
@@ -169,7 +177,7 @@ def build_router(deps: TelegramDependencies) -> Router:
                         name="submit_uploaded_image",
                         payload={
                             "upload": ImageUpload(
-                                content=buffer.getvalue(),
+                                content=content_bytes,
                                 filename=f"telegram_{photo.file_unique_id}.jpg",
                                 content_type="image/jpeg",
                             )
@@ -178,6 +186,10 @@ def build_router(deps: TelegramDependencies) -> Router:
                     known_user=user,
                 ),
             )
+            # ImageUpload (and its content bytes) is no longer referenced
+            # past this await — drop the local handle so the GC can reclaim
+            # multi-MiB buffers immediately rather than at function exit.
+            del content_bytes
         except (RuntimeError, OSError) as error:
             logger.exception("Photo flow failed: %s", error)
             await _safe_log_event(
@@ -329,24 +341,30 @@ def build_router(deps: TelegramDependencies) -> Router:
             return
         import io as _io
 
+        # Download into a closed-on-exit BytesIO so we don't pin the
+        # underlying buffer past the moment we've decoded the JSON text.
         buffer = _io.BytesIO()
         try:
-            await message.bot.download(message.document, destination=buffer)
-        except Exception as error:
-            logger.warning("Failed to download import document: %s", error)
-            await deps.renderer.notify_error(
-                message,
-                deps.localizer.t("errors.unexpected", user.language),
-            )
-            return
-        try:
-            text_payload = buffer.getvalue().decode("utf-8")
-        except UnicodeDecodeError:
-            await deps.renderer.notify_error(
-                message,
-                deps.localizer.t("errors.import_invalid_json", user.language),
-            )
-            return
+            try:
+                await message.bot.download(message.document, destination=buffer)
+            except Exception as error:
+                logger.warning("Failed to download import document: %s", error)
+                await deps.renderer.notify_error(
+                    message,
+                    deps.localizer.t("errors.unexpected", user.language),
+                )
+                return
+            try:
+                text_payload = buffer.getvalue().decode("utf-8")
+            except UnicodeDecodeError:
+                await deps.renderer.notify_error(
+                    message,
+                    deps.localizer.t("errors.import_invalid_json", user.language),
+                )
+                return
+        finally:
+            buffer.close()
+
         try:
             result = await deps.facade.import_user_data(user_id=user.id, payload=text_payload)
         except DomainError as error:
@@ -362,6 +380,10 @@ def build_router(deps: TelegramDependencies) -> Router:
                 deps.localizer.t("errors.unexpected", user.language),
             )
             return
+        # Drop the decoded text once the use case has consumed it — for a
+        # near-1 MiB import this matters under burst load.
+        del text_payload
+
         summary = deps.localizer.t(
             "messages.import_summary",
             user.language,

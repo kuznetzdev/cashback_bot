@@ -31,6 +31,8 @@
     "empty_history": "History is empty.",
     "no_ranking_data": "Not enough data to build ranking.",
     "reminder_monthly": "Don't forget to update your cashback categories for the new month!",
+    "reminder_upcoming_month": "📅 New month starts in {days} days — pick your cashback categories now so day one doesn't go to waste.",
+    "reminder_stale_data": "⏳ Your cashback data hasn't been refreshed for {days} days. Many banks rotate categories monthly — refresh so the recommendations stay honest.",
     "web_login_hint": "Sign in with Telegram and manage cashback categories from phone or desktop.",
     "web_auth_hint": "Sign in with a local account. Telegram remains available as an optional linked identity.",
     "upload_hint": "Upload a screenshot from your banking app. Crop extra regions for better OCR.",

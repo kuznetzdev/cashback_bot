@@ -99,6 +99,16 @@ class CashbackRepositoryPort(Protocol):
         """
         ...
 
+    async def latest_updated_at_for_user(self, user_id: int) -> datetime | None:
+        """Most recent ``updated_at`` across the user's banks + items.
+
+        Used by the freshness-check reminder use cases to decide whether
+        the user's cashback data is current. ``None`` means the user has
+        no banks yet — that should not trigger a "your data is stale"
+        notification.
+        """
+        ...
+
 
 class LogRepositoryPort(Protocol):
     async def add(self, user_id: int, action: str, payload: dict | None = None) -> None: ...
@@ -131,6 +141,18 @@ class OCRPort(Protocol):
 
 class ReminderSenderPort(Protocol):
     async def send_monthly_reminder(self, target: ReminderTarget) -> None: ...
+
+    async def send_upcoming_month_reminder(
+        self, target: ReminderTarget, *, days_until_next_month: int
+    ) -> None:
+        """Notify the user a few days before the new month so they can refresh
+        their bank cashback choices in advance."""
+        ...
+
+    async def send_stale_data_reminder(self, target: ReminderTarget, *, days_since_last_update: int) -> None:
+        """Notify the user that their saved data hasn't been refreshed for
+        the current month, so recommendations may be misleading."""
+        ...
 
 
 class ClockPort(Protocol):

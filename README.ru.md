@@ -14,8 +14,8 @@ Production-grade платформа анализа категорий кешбэ
 отвечает на один вопрос, важный на кассе: *«какой картой платить прямо
 сейчас?»*.
 
-[![tests](https://img.shields.io/badge/tests-417%20passing-brightgreen)](tests/)
-[![version](https://img.shields.io/badge/version-1.1.0-blue)](CHANGELOG.md)
+[![tests](https://img.shields.io/badge/tests-433%20passing-brightgreen)](tests/)
+[![version](https://img.shields.io/badge/version-1.2.0-blue)](CHANGELOG.md)
 [![python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
 [![docker](https://img.shields.io/badge/docker-compose--ready-blue)](docker-compose.yml)
 

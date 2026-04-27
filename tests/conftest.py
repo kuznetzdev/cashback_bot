@@ -35,6 +35,10 @@ class InMemoryStore:
     credentials_by_email: dict[str, int] = field(default_factory=dict)
     banks: dict[int, Bank] = field(default_factory=dict)
     bank_items: dict[int, list[CashbackDraftItem]] = field(default_factory=dict)
+    # Mirrors the postgres adapter's updated_at semantics so the
+    # stale-data freshness check can be unit-tested with the same
+    # logic that runs in production.
+    bank_updated_at: dict[int, datetime] = field(default_factory=dict)
     logs: list[UserLogEntry] = field(default_factory=list)
 
 
@@ -233,6 +237,7 @@ class InMemoryBanksRepo:
     async def create(self, user_id: int, bank_name: str) -> Bank:
         bank = Bank(id=self.store.next_bank_id, user_id=user_id, bank_name=bank_name.strip())
         self.store.banks[bank.id] = bank
+        self.store.bank_updated_at[bank.id] = datetime.now()
         self.store.next_bank_id += 1
         return bank
 
@@ -240,10 +245,12 @@ class InMemoryBanksRepo:
         bank = self.store.banks.get(bank_id)
         if bank is not None:
             bank.bank_name = bank_name.strip()
+            self.store.bank_updated_at[bank_id] = datetime.now()
 
     async def delete(self, bank_id: int) -> None:
         self.store.banks.pop(bank_id, None)
         self.store.bank_items.pop(bank_id, None)
+        self.store.bank_updated_at.pop(bank_id, None)
 
 
 class InMemoryCashbackRepo:
@@ -255,6 +262,19 @@ class InMemoryCashbackRepo:
 
     async def replace_for_bank(self, bank_id: int, items: list[CashbackDraftItem]) -> None:
         self.store.bank_items[bank_id] = list(items)
+        # Touch the bank's freshness marker so the stale-data reminder
+        # use case sees this write as a refresh.
+        self.store.bank_updated_at[bank_id] = datetime.now()
+
+    async def latest_updated_at_for_user(self, user_id: int):
+        latest: datetime | None = None
+        for bank in self.store.banks.values():
+            if bank.user_id != user_id:
+                continue
+            ts = self.store.bank_updated_at.get(bank.id)
+            if ts is not None and (latest is None or ts > latest):
+                latest = ts
+        return latest
 
     async def list_ranking_entries_for_user(self, user_id: int):
         # Mirrors the postgres adapter's single-query semantics so tests

@@ -45,6 +45,8 @@ from app.application.use_cases.quick_add_bank import QuickAddBankUseCase
 from app.application.use_cases.ranking_snapshot import RankingSnapshotUseCase
 from app.application.use_cases.save_bank_draft import SaveBankDraftUseCase
 from app.application.use_cases.send_monthly_reminders import SendMonthlyRemindersUseCase
+from app.application.use_cases.send_pre_month_reminders import SendPreMonthRemindersUseCase
+from app.application.use_cases.send_stale_data_reminders import SendStaleDataRemindersUseCase
 from app.application.use_cases.sync_user import SyncTelegramUserUseCase
 from app.application.use_cases.toggle_notifications import ToggleNotificationsUseCase
 from app.bootstrap.config import Settings
@@ -267,6 +269,20 @@ def build_application_facade(core: CoreContainer, reminder_sender: ReminderSende
         clock=core.clock,
         reminder_hour=core.settings.reminder_hour,
     )
+    pre_month_reminders = SendPreMonthRemindersUseCase(
+        uow_factory=core.uow_factory,
+        sender=reminder_sender,
+        clock=core.clock,
+        window_days=core.settings.pre_month_reminder_window_days,
+        reminder_hour=core.settings.reminder_hour,
+    )
+    stale_data_reminders = SendStaleDataRemindersUseCase(
+        uow_factory=core.uow_factory,
+        sender=reminder_sender,
+        clock=core.clock,
+        threshold_days=core.settings.stale_data_threshold_days,
+        reminder_hour=core.settings.reminder_hour,
+    )
     return ApplicationFacade(
         register_local_user,
         authenticate_local_user,
@@ -286,4 +302,6 @@ def build_application_facade(core: CoreContainer, reminder_sender: ReminderSende
         ranking_snapshot,
         export_user_data_use_case=export_user_data,
         import_user_data_use_case=import_user_data,
+        pre_month_reminders_use_case=pre_month_reminders,
+        stale_data_reminders_use_case=stale_data_reminders,
     )
